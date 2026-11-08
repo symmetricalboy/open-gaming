@@ -1,17 +1,17 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.defs",
-  "description": "Shared type definitions for Open Gaming achievements and leaderboards.",
+  "description": "Shared type definitions for Open Gaming achievements, multi-component leaderboards, inline attestations, and genre extensions.",
   "defs": {
     "inlineSignature": {
       "type": "object",
-      "description": "An inline CID-first cryptographic attestation (compatible with the badge.blue / atproto-attestation specification). Computed over the DAG-CBOR CIDv1 of the parent record with `signatures` stripped and `$sig` injected containing `repository: <playerDid>`.",
+      "description": "An inline CID-first cryptographic attestation (compatible with the badge.blue / atproto-attestation specification). Computed over the DAG-CBOR CIDv1 of the parent record with `signatures` stripped and `$sig` injected containing `repository: <playerDid>` (and optional `rkey` when bound to a specific record key). Supports multi-issuer federation via `issuer`.",
       "required": ["key", "signature"],
       "properties": {
         "key": {
           "type": "string",
           "maxLength": 256,
-          "description": "Verification method URI or DID key used to sign the attestation CID (e.g. `did:plc:gamepublisher#attestations` or `did:key:z...`)."
+          "description": "Verification method URI or DID key used to sign the attestation CID (e.g. `did:plc:gamepublisher#attestations`, `did:plc:communityhost#attestations`, or `did:key:z...`)."
         },
         "signature": {
           "type": "bytes",
@@ -21,12 +21,18 @@
         "issuer": {
           "type": "string",
           "format": "did",
-          "description": "Optional DID of the game publisher or authority issuing the attestation."
+          "description": "Optional DID of the game publisher, tournament host, or community revival authority issuing the attestation."
         },
         "issuedAt": {
           "type": "string",
           "format": "datetime",
           "description": "Optional timestamp when the signature was generated."
+        },
+        "rkey": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 512,
+          "description": "Optional record key binding. When present, verifiers ensure the record resides at this exact `rkey`, preventing a player from moving a signed payload to a new `rkey` to evade URI-targeted ATProto moderation labels."
         },
         "cid": {
           "type": "string",
@@ -37,7 +43,7 @@
     },
     "scoreFormat": {
       "type": "object",
-      "description": "Formatting rules for integer leaderboard scores (modeled on Google Play Games Services score formatting, compatible with ATProto's integer-only data model).",
+      "description": "Formatting rules for single-value integer leaderboard scores (modeled on Google Play Games Services score formatting, compatible with ATProto's integer-only data model).",
       "required": ["kind"],
       "properties": {
         "kind": {
@@ -63,7 +69,7 @@
         "currencyCode": {
           "type": "string",
           "maxLength": 3,
-          "description": "ISO 4217 3-letter currency code (e.g. `USD`) when `kind` is `currency`. Following Play Games Services, micro-units (`decimalPlaces: 6`) or cents (`decimalPlaces: 2`) may be used."
+          "description": "ISO 4217 3-letter currency code (e.g. `USD`) when `kind` is `currency`."
         },
         "unitSingular": {
           "type": "string",
@@ -76,6 +82,352 @@
           "maxGraphemes": 32,
           "maxLength": 128,
           "description": "Optional custom plural unit label for `numeric` scores (e.g. `meters`, `pipes`, `likes`, `pts`)."
+        }
+      }
+    },
+    "enumOption": {
+      "type": "object",
+      "description": "A named option in an `#enumComponentDef`, ordered from best (index 0) to worst unless `sortOrder` specifies otherwise.",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 32,
+          "description": "Stable identifier for this enum value (e.g. `all-perfect`, `full-combo`, `clear`, `rank-s`)."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Human-readable display label (e.g. `All Perfect`, `Full Combo`, `S`)."
+        }
+      }
+    },
+    "pointsComponentDef": {
+      "type": "object",
+      "description": "Defines an integer points/count component on a multi-component leaderboard (e.g. EX Score, Points, Collectibles, Max Combo).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "largerIsBetter"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        },
+        "unitSingular": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128
+        },
+        "unitPlural": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128
+        }
+      }
+    },
+    "percentageComponentDef": {
+      "type": "object",
+      "description": "Defines a fixed-point percentage accuracy/completion component. Values are stored as integers scaled by `10^precision` (e.g. `precision: 2` and value `9942` displays as `99.42%`).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "largerIsBetter"
+        },
+        "precision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 2,
+          "description": "Number of decimal places implied on the integer value."
+        },
+        "minimum": {
+          "type": "integer",
+          "description": "Minimum valid scaled integer value (e.g. `0`)."
+        },
+        "maximum": {
+          "type": "integer",
+          "description": "Maximum valid scaled integer value (e.g. `10000` for `100.00%`, or `10100` for `101.00%`)."
+        }
+      }
+    },
+    "timeComponentDef": {
+      "type": "object",
+      "description": "Defines an elapsed-time or survival-time component on a multi-component leaderboard.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "smallerIsBetter"
+        },
+        "timeUnit": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["milliseconds", "seconds"],
+          "default": "milliseconds"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        }
+      }
+    },
+    "enumComponentDef": {
+      "type": "object",
+      "description": "Defines an ordered categorical component such as rhythm-game clear lamps (`ALL PERFECT`, `FULL COMBO`, `CLEAR`) or letter grades (`S`, `A`, `B`, `C`).",
+      "required": ["name", "values"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "smallerIsBetter",
+          "description": "By default (`smallerIsBetter`), earlier entries in `values` (index 0) rank higher."
+        },
+        "values": {
+          "type": "array",
+          "minLength": 1,
+          "maxLength": 64,
+          "items": {
+            "type": "ref",
+            "ref": "#enumOption"
+          }
+        }
+      }
+    },
+    "textComponentDef": {
+      "type": "object",
+      "description": "Defines a display-only text metadata component (e.g. character, modifier list, or seed).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "maxGraphemes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 64
+        }
+      }
+    },
+    "scoreComponentDefMap": {
+      "type": "object",
+      "description": "Dictionary map of component key (`record-key` format, 1..32 chars, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to typed component definition. Uses the forward-compatible `$keyFormat`/`$valueType` Lexicon v1 object convention so existing PDS records and DAG-CBOR attestation CIDs require zero migration when the Lexicon `map` schema type ships.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "union",
+          "refs": [
+            "#pointsComponentDef",
+            "#percentageComponentDef",
+            "#timeComponentDef",
+            "#enumComponentDef",
+            "#textComponentDef"
+          ],
+          "closed": false,
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "pointsComponentVal": {
+      "type": "object",
+      "description": "Integer points/count value matching a `#pointsComponentDef` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "percentageComponentVal": {
+      "type": "object",
+      "description": "Scaled fixed-point integer percentage value matching a `#percentageComponentDef` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "timeComponentVal": {
+      "type": "object",
+      "description": "Integer time duration value matching a `#timeComponentDef` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "enumComponentVal": {
+      "type": "object",
+      "description": "Enum option `id` matching an `#enumComponentDef` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 32
+        }
+      }
+    },
+    "textComponentVal": {
+      "type": "object",
+      "description": "Display text value matching a `#textComponentDef` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "maxGraphemes": 256,
+          "maxLength": 1000
+        }
+      }
+    },
+    "scoreComponentValMap": {
+      "type": "object",
+      "description": "Dictionary map of component key (`record-key` format, matching `leaderboard.definition#components`) to typed component value (`#pointsComponentVal`, `#percentageComponentVal`, `#timeComponentVal`, `#enumComponentVal`, `#textComponentVal`). Forward-compatible with the proposed Lexicon `map` type without changing wire data or DAG-CBOR attestation CIDs.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "union",
+          "refs": [
+            "#pointsComponentVal",
+            "#percentageComponentVal",
+            "#timeComponentVal",
+            "#enumComponentVal",
+            "#textComponentVal"
+          ],
+          "closed": false,
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "judgmentEntry": {
+      "type": "object",
+      "description": "Timing judgment count for a single judgment window (e.g. `marvelous`, `perfect`, `great`, `good`, `miss`) in a rhythm or precision action game.",
+      "required": ["total"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "early": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "late": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "judgmentMap": {
+      "type": "object",
+      "description": "Dictionary map of timing judgment key (`record-key` format, e.g. `marvelous`, `perfect`, `great`, `good`, `miss`) to `#judgmentEntry` counts, using the forward-compatible `$keyFormat`/`$valueType` Lexicon `map` convention.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "ref",
+          "ref": "#judgmentEntry",
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "judgmentBreakdown": {
+      "type": "object",
+      "description": "Standardized Lexicon v1 judgment & input breakdown for rhythm/arcade runs (inspired by `dev.tsunagite.score`), attachable via `leaderboard.score#details`.",
+      "required": ["judgments"],
+      "properties": {
+        "judgments": {
+          "type": "ref",
+          "ref": "#judgmentMap"
+        },
+        "judgmentOrder": {
+          "type": "array",
+          "maxLength": 32,
+          "description": "Optional explicit display order of judgment keys in `judgments` (e.g. `[\"marvelous\", \"perfect\", \"great\", \"miss\"]`), preserving author-intended order across DAG-CBOR canonical map-key sorting.",
+          "items": {
+            "type": "string",
+            "format": "record-key",
+            "maxLength": 32
+          }
+        },
+        "maxCombo": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalEarly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalLate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional play mode token (e.g. `singles`, `doubles`, `4k`, `7k`)."
+        },
+        "inputMethod": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional controller/input method token (e.g. `keyboard`, `gamepad`, `arcade-controller`, `touch`)."
         }
       }
     }

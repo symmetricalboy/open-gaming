@@ -2,6 +2,7 @@ export * from './constants.js';
 export * from './types.js';
 export * from './keys.js';
 export * from './plc.js';
+export * from './labels.js';
 export * from './attestation.js';
 export * from './revocation.js';
 export * from './profile.js';

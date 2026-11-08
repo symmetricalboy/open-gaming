@@ -13,13 +13,21 @@ import {
   createSignedScore,
   createSignedUnlock,
   evaluateScoreSubmission,
+  formatComponentValue,
   formatScore,
   generateSigningKeys,
+  getOrderedComponentIds,
+  getOrderedJudgmentIds,
+  getScoreSortMetric,
   loadSigningKey,
+  resolveActiveLabels,
   sortAchievementDefinitions,
   summarizeActorProfile,
+  validateComponentDefs,
+  validateScoreComponents,
   verifyRecordAttestation,
   type AchievementDefinitionRecord,
+  type AtprotoLabel,
   type LeaderboardDefinitionRecord,
 } from '../index.js';
 
@@ -470,5 +478,355 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
     });
     assert.equal(outOfBounds.validBounds, false);
     assert.equal(outOfBounds.shouldWrite, false);
+  });
+
+  it('supports forward-compatible component maps + componentOrder, #judgmentBreakdown maps, rankedVersions, and replay blobs', async () => {
+    const lex = createOpenGamingLexicons();
+    const gameKeys = await generateSigningKeys();
+    const rhythmLbUri = `at://${GAME_DID}/${NSIDS.LeaderboardDefinition}/rhythm-stage-1`;
+
+    // Deliberately list map keys in DAG-CBOR byte-length order (`lamp`, `comment`, `accuracy`, `ex-score`, `clear-time`)
+    // to prove `componentOrder` preserves author-intended column order after DAG-CBOR round-trips!
+    const rhythmDef: LeaderboardDefinitionRecord = {
+      $type: NSIDS.LeaderboardDefinition,
+      game: GAME_URI,
+      name: 'Skyline Pulse [HYPER]',
+      icon: DUMMY_ICON,
+      components: {
+        lamp: {
+          $type: 'games.opengaming.defs#enumComponentDef',
+          name: 'Clear Lamp',
+          sortOrder: 'smallerIsBetter',
+          values: [
+            { id: 'ap', name: 'All Perfect' },
+            { id: 'fc', name: 'Full Combo' },
+            { id: 'clear', name: 'Cleared' },
+          ],
+        },
+        comment: {
+          $type: 'games.opengaming.defs#textComponentDef',
+          name: 'Run Note',
+          maxGraphemes: 64,
+        },
+        accuracy: {
+          $type: 'games.opengaming.defs#percentageComponentDef',
+          name: 'Accuracy',
+          sortOrder: 'largerIsBetter',
+          precision: 2,
+          minimum: 0,
+          maximum: 10000,
+        },
+        'ex-score': {
+          $type: 'games.opengaming.defs#pointsComponentDef',
+          name: 'EX Score',
+          sortOrder: 'largerIsBetter',
+          minimum: 0,
+          maximum: 4000,
+          unitSingular: 'EX',
+          unitPlural: 'EX',
+        },
+        'clear-time': {
+          $type: 'games.opengaming.defs#timeComponentDef',
+          name: 'Clear Time',
+          sortOrder: 'smallerIsBetter',
+          timeUnit: 'milliseconds',
+          minimum: 10000,
+          maximum: 600000,
+        },
+      },
+      componentOrder: ['ex-score', 'accuracy', 'clear-time', 'lamp', 'comment'],
+      defaultComponent: 'ex-score',
+      detailsSchema: 'games.opengaming.defs#judgmentBreakdown',
+      rankedVersions: ['sha256:legal-chart-v2'],
+      timeframes: ['allTime', 'weekly'],
+      recordPolicy: 'perWindowBest',
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+
+    lex.assertValidRecord(NSIDS.LeaderboardDefinition, jsonToLex(rhythmDef));
+    assert.equal(validateComponentDefs(rhythmDef.components, rhythmDef.componentOrder), null);
+    assert.deepEqual(getOrderedComponentIds(rhythmDef), [
+      'ex-score',
+      'accuracy',
+      'clear-time',
+      'lamp',
+      'comment',
+    ]);
+
+    const replayBlob = {
+      $type: 'blob' as const,
+      ref: { $link: 'bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori' },
+      mimeType: 'application/octet-stream',
+      size: 4096,
+    };
+
+    const judgmentDetails = {
+      $type: 'games.opengaming.defs#judgmentBreakdown' as const,
+      judgments: {
+        miss: { total: 0 },
+        great: { total: 40, early: 15, late: 25 },
+        perfect: { total: 1400 },
+      },
+      judgmentOrder: ['perfect', 'great', 'miss'],
+      maxCombo: 1440,
+      totalEarly: 15,
+      totalLate: 25,
+      mode: '4k',
+      inputMethod: 'keyboard',
+    };
+    assert.deepEqual(getOrderedJudgmentIds(judgmentDetails), ['perfect', 'great', 'miss']);
+
+    const { record: signedRhythmScore, attestationCid } = await createSignedScore({
+      leaderboard: rhythmLbUri,
+      game: GAME_URI,
+      playerDid: ALICE_DID,
+      issuerDid: GAME_DID,
+      rkey: 'rhythm-pb-1',
+      components: {
+        'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 2840 },
+        accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9942 },
+        'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 124150 },
+        lamp: { $type: 'games.opengaming.defs#enumComponentVal', value: 'fc' },
+        comment: { $type: 'games.opengaming.defs#textComponentVal', value: 'Sightread FC!' },
+      },
+      details: judgmentDetails,
+      version: 'sha256:legal-chart-v2',
+      replay: replayBlob,
+      signingKey: gameKeys.keypair,
+    });
+
+    const hydratedLex = jsonToLex(signedRhythmScore);
+    lex.assertValidRecord(NSIDS.LeaderboardScore, hydratedLex);
+
+    // Deterministic CID verification works identically on both raw JSON and jsonToLex-hydrated records (BlobRef CID normalization)
+    const verifyRaw = await verifyRecordAttestation({
+      record: signedRhythmScore,
+      recordUri: `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/rhythm-pb-1`,
+      playerDid: ALICE_DID,
+      publicDidKey: gameKeys.publicDidKey,
+    });
+    assert.equal(verifyRaw.verified, true);
+
+    const verifyHydrated = await verifyRecordAttestation({
+      record: hydratedLex as Record<string, any>,
+      recordUri: `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/rhythm-pb-1`,
+      playerDid: ALICE_DID,
+      publicDidKey: gameKeys.publicDidKey,
+    });
+    assert.equal(verifyHydrated.verified, true);
+    if (verifyHydrated.verified) {
+      assert.equal(verifyHydrated.attestationCid, attestationCid);
+    }
+
+    assert.equal(validateScoreComponents(signedRhythmScore.components, rhythmDef), null);
+
+    // Reject reserved/invalid map keys and $type mismatches at application layer
+    assert.notEqual(
+      validateScoreComponents(
+        { $keyFormat: { $type: 'games.opengaming.defs#pointsComponentVal', value: 1 } },
+        rhythmDef
+      ),
+      null
+    );
+    assert.notEqual(
+      validateScoreComponents(
+        { 'ex-score': { $type: 'games.opengaming.defs#enumComponentVal', value: 'fc' } },
+        rhythmDef
+      ),
+      null
+    );
+
+    assert.equal(
+      formatComponentValue(
+        signedRhythmScore.components!.accuracy,
+        rhythmDef.components!.accuracy,
+        'en-US'
+      ),
+      '99.42%'
+    );
+
+    const exMetric = getScoreSortMetric(signedRhythmScore, rhythmDef, 'ex-score', 'en-US');
+    assert.equal(exMetric?.sortableValue, 2840);
+    assert.equal(exMetric?.displayValue, '2,840 EX');
+    assert.equal(exMetric?.sortOrder, 'largerIsBetter');
+
+    const timeMetric = getScoreSortMetric(signedRhythmScore, rhythmDef, 'clear-time', 'en-US');
+    assert.equal(timeMetric?.sortableValue, 124150);
+    assert.equal(timeMetric?.displayValue, '2:04.15');
+    assert.equal(timeMetric?.sortOrder, 'smallerIsBetter');
+
+    const lampMetric = getScoreSortMetric(signedRhythmScore, rhythmDef, 'lamp', 'en-US');
+    assert.equal(lampMetric?.sortableValue, 1);
+    assert.equal(lampMetric?.displayValue, 'Full Combo');
+
+    // Outdated chart hash rejected by evaluateScoreSubmission
+    const outdatedDecision = evaluateScoreSubmission({
+      leaderboardUri: rhythmLbUri,
+      components: signedRhythmScore.components,
+      version: 'sha256:old-chart-v1',
+      definition: rhythmDef,
+      existingPlayerScores: [],
+    });
+    assert.equal(outdatedDecision.validBounds, false);
+    assert.equal(outdatedDecision.shouldWrite, false);
+
+    // Legal chart hash accepted
+    const legalDecision = evaluateScoreSubmission({
+      leaderboardUri: rhythmLbUri,
+      components: signedRhythmScore.components,
+      version: 'sha256:legal-chart-v2',
+      definition: rhythmDef,
+      existingPlayerScores: [],
+    });
+    assert.equal(legalDecision.validBounds, true);
+    assert.equal(legalDecision.shouldWrite, true);
+  });
+});
+
+describe('Spoiler-Proof Hidden Stubs, EoS Federation, $sig.rkey Binding & ATProto Labels', () => {
+  it('validates redacted hidden:true achievement stubs with hiddenSpace and definitionCid on progress', async () => {
+    const lex = createOpenGamingLexicons();
+    const gameKeys = await generateSigningKeys();
+
+    const redactedStub: AchievementDefinitionRecord = {
+      $type: NSIDS.AchievementDefinition,
+      game: GAME_URI,
+      hidden: true,
+      hiddenSpace: 'at://did:plc:flappyskygameexample/app.bsky.space/true-ending-spoilers',
+      tier: 'platinum',
+      listOrder: 99,
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+    lex.assertValidRecord(NSIDS.AchievementDefinition, jsonToLex(redactedStub));
+
+    const { record: progressWithDefCid } = await createSignedProgress({
+      achievement: `at://${GAME_DID}/${NSIDS.AchievementDefinition}/secret-ending`,
+      definitionCid: 'bafyreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori',
+      currentSteps: 3,
+      stepsNeeded: 5,
+      playerDid: ALICE_DID,
+      issuerDid: GAME_DID,
+      signingKey: gameKeys.keypair,
+    });
+    lex.assertValidRecord(NSIDS.AchievementProgress, jsonToLex(progressWithDefCid));
+  });
+
+  it('enforces $sig.rkey anti-evasion binding, multi-issuer EoS federation, and ATProto Labeler moderation', async () => {
+    const revivalKeys = await generateSigningKeys();
+    const REVIVAL_DID = 'did:web:revival.community.games';
+    const LABELER_DID = 'did:plc:anticheatlabeler0001';
+
+    const { record: revivalSigned } = await createSignedScore({
+      leaderboard: LB_HIGH_SCORE,
+      score: 320,
+      playerDid: ALICE_DID,
+      issuerDid: REVIVAL_DID,
+      rkey: 'legit-rkey-1',
+      signingKey: revivalKeys.keypair,
+    });
+
+    // Without trustedIssuerDids, revival server signature is rejected for GAME_DID's leaderboard
+    const untrustedRes = await verifyRecordAttestation({
+      record: revivalSigned,
+      recordUri: `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/legit-rkey-1`,
+      playerDid: ALICE_DID,
+      publicDidKey: revivalKeys.publicDidKey,
+    });
+    assert.equal(untrustedRes.verified, false);
+    if (!untrustedRes.verified) {
+      assert.equal(untrustedRes.error, 'issuer_mismatch');
+    }
+
+    // With trustedIssuerDids, revival server signature verifies cleanly
+    const trustedRes = await verifyRecordAttestation({
+      record: revivalSigned,
+      recordUri: `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/legit-rkey-1`,
+      playerDid: ALICE_DID,
+      trustedIssuerDids: [REVIVAL_DID],
+      publicDidKey: revivalKeys.publicDidKey,
+    });
+    assert.equal(trustedRes.verified, true);
+
+    // Moving an rkey-bound signed record to a new rkey to evade URI labels fails with rkey_mismatch!
+    const movedRkeyRes = await verifyRecordAttestation({
+      record: revivalSigned,
+      recordUri: `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/evaded-rkey-2`,
+      playerDid: ALICE_DID,
+      trustedIssuerDids: [REVIVAL_DID],
+      publicDidKey: revivalKeys.publicDidKey,
+    });
+    assert.equal(movedRkeyRes.verified, false);
+    if (!movedRkeyRes.verified) {
+      assert.equal(movedRkeyRes.error, 'rkey_mismatch');
+    }
+
+    // ATProto anti-cheat label (`!cheat`) invalidates record; `neg: true` appeal reinstates it
+    const targetUri = `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/legit-rkey-1`;
+    const cheatLabel: AtprotoLabel = {
+      src: LABELER_DID,
+      uri: targetUri,
+      val: '!cheat',
+      cts: '2026-11-08T01:00:00.000Z',
+    };
+
+    const labeledRes = await verifyRecordAttestation({
+      record: revivalSigned,
+      recordUri: targetUri,
+      playerDid: ALICE_DID,
+      trustedIssuerDids: [REVIVAL_DID],
+      publicDidKey: revivalKeys.publicDidKey,
+      activeLabels: resolveActiveLabels([cheatLabel]),
+    });
+    assert.equal(labeledRes.verified, false);
+    if (!labeledRes.verified) {
+      assert.equal(labeledRes.error, 'label_invalidated');
+    }
+
+    const negatedLabels = resolveActiveLabels([
+      cheatLabel,
+      {
+        src: LABELER_DID,
+        uri: targetUri,
+        val: '!cheat',
+        neg: true,
+        cts: '2026-11-08T02:00:00.000Z',
+      },
+    ]);
+    assert.equal(negatedLabels.length, 0);
+
+    // Post-EoS unsigned direct-to-PDS replay run verified via community `verified-replay` label
+    const unsignedEosRun = {
+      $type: NSIDS.LeaderboardScore,
+      leaderboard: LB_HIGH_SCORE,
+      score: 410,
+      recordedAt: '2026-11-08T03:00:00.000Z',
+    };
+    const eosUri = `at://${ALICE_DID}/${NSIDS.LeaderboardScore}/eos-run-1`;
+
+    const unverifiedEos = await verifyRecordAttestation({
+      record: unsignedEosRun,
+      recordUri: eosUri,
+      playerDid: ALICE_DID,
+    });
+    assert.equal(unverifiedEos.verified, false);
+
+    const communityVerifiedEos = await verifyRecordAttestation({
+      record: unsignedEosRun,
+      recordUri: eosUri,
+      playerDid: ALICE_DID,
+      allowCommunityLabelVerification: true,
+      activeLabels: [
+        {
+          src: LABELER_DID,
+          uri: eosUri,
+          val: 'verified-replay',
+          cts: '2026-11-08T03:05:00.000Z',
+        },
+      ],
+    });
+    assert.equal(communityVerifiedEos.verified, true);
+    if (communityVerifiedEos.verified) {
+      assert.equal(communityVerifiedEos.issuerDid, LABELER_DID);
+    }
   });
 });

@@ -5,11 +5,11 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). Open Gaming intentionally omits global XP/gamerscore values and per-game achievement count caps so achievements are appreciated on a per-game basis without cross-game inflation or clout-chasing.",
+      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). For spoiler-sensitive secrets (`hidden: true`), `title`, `description`, and `icon` MAY be omitted from the public PDS stub and revealed via an access-controlled ATProto Space (`hiddenSpace`) granted upon unlock.",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["game", "title", "description", "icon", "createdAt"],
+        "required": ["game", "createdAt"],
         "properties": {
           "game": {
             "type": "string",
@@ -20,13 +20,13 @@
             "type": "string",
             "maxGraphemes": 100,
             "maxLength": 300,
-            "description": "Display name of the achievement (e.g. `Sky Surfer`). Can be edited for typos without breaking player unlock references."
+            "description": "Display name of the achievement (e.g. `Sky Surfer`). Required for visible (`hidden: false`) achievements; may be omitted on redacted public stubs when `hidden: true`."
           },
           "description": {
             "type": "string",
             "maxGraphemes": 500,
             "maxLength": 1500,
-            "description": "Concise description of the achievement (earned summary or general explanation)."
+            "description": "Concise description of the achievement (earned summary or general explanation). May be omitted on redacted public stubs when `hidden: true`."
           },
           "requirement": {
             "type": "string",
@@ -38,7 +38,7 @@
             "type": "blob",
             "accept": ["image/png", "image/jpeg", "image/webp"],
             "maxSize": 1000000,
-            "description": "Required square icon representing the unlocked achievement (512x512 PNG or WebP with alpha transparency recommended)."
+            "description": "Square icon representing the unlocked achievement (512x512 PNG or WebP with alpha transparency recommended). May be omitted on redacted public stubs when `hidden: true`."
           },
           "iconAlt": {
             "type": "string",
@@ -50,7 +50,7 @@
             "type": "blob",
             "accept": ["image/png", "image/jpeg", "image/webp"],
             "maxSize": 1000000,
-            "description": "Optional distinct icon shown while the achievement is locked. If omitted, clients render a dimmed/grayscale treatment or generic lock badge."
+            "description": "Optional distinct icon shown while the achievement is locked (or as the public silhouette on a redacted `hidden: true` stub). If omitted, clients render a dimmed/grayscale treatment or generic lock badge."
           },
           "tier": {
             "type": "string",
@@ -61,7 +61,13 @@
           "hidden": {
             "type": "boolean",
             "default": false,
-            "description": "If true, clients MUST mask the achievement's title, description, and icon until the viewing player has unlocked it. Note: PDS records are public on the network; avoid placing major plot spoilers in plaintext fields of pre-published records."
+            "description": "If true, clients MUST mask the achievement's title, description, and icon until the viewing player has unlocked it. To prevent firehose/`pds.ls` spoiler leaks, publishers MAY omit plaintext `title`/`description`/`icon` on the public PDS record and point `hiddenSpace` to an access-controlled ATProto Space that auto-adds players upon unlock."
+          },
+          "hiddenSpace": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 512,
+            "description": "Optional URI of an access-controlled ATProto Space (or reveal endpoint) holding the unredacted `achievement.definition` metadata for players who have unlocked this hidden achievement."
           },
           "stepsNeeded": {
             "type": "integer",
@@ -84,6 +90,15 @@
             "type": "string",
             "format": "at-uri",
             "description": "Optional AT-URI linking to a corresponding `community.lexicon.badge.definition` record (e.g. for cross-displaying a game's 100% Platinum milestone in general ATProto badge drawers)."
+          },
+          "trustedIssuers": {
+            "type": "array",
+            "maxLength": 32,
+            "description": "Optional list of additional DIDs authorized to sign unlock attestations for this achievement (e.g. federated tournament hosts or post-EoS community revival servers).",
+            "items": {
+              "type": "string",
+              "format": "did"
+            }
           },
           "createdAt": {
             "type": "string",

@@ -3,9 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '../../../');
 import { AtpAgent } from '@atproto/api';
 import { jsonToLex } from '@atproto/lexicon';
 import {
@@ -19,17 +16,28 @@ import {
   createSignedUnlock,
   verifyRecordAttestation,
 } from './attestation.js';
+import { resolveActiveLabels } from './labels.js';
 import {
   createRevocationRecord,
   publishRevocation,
   reinstateRevocation,
 } from './revocation.js';
+import {
+  validateComponentDefs,
+  validateScoreComponents,
+} from './leaderboards.js';
 import { NSIDS } from './constants.js';
 import type {
+  AtprotoLabel,
+  LeaderboardDefinitionRecord,
   RevocationReason,
   RevocationRecord,
   RevocationScope,
+  ScoreComponentValMap,
 } from './types.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '../../../');
 
 const HELP_TEXT = `
 Open Gaming CLI (games.opengaming.*)
@@ -43,8 +51,8 @@ Commands:
   plc-register-key       Register your public did:key under #attestations on PLC
   validate               Validate Lexicon schemas and example records
   sign-unlock            Create & inline-sign an achievement.unlock record
-  sign-score             Create & inline-sign a leaderboard.score record
-  verify                 Verify an inline-signed record (and check revocations)
+  sign-score             Create & inline-sign a leaderboard.score record (single or multi-component)
+  verify                 Verify a record (inline attestations, multi-issuer, revocations, & ATProto labels)
   revoke                 Create (and optionally publish) a games.opengaming.revocation record
   unrevoke               Delete a revocation record from the game publisher's PDS
 
@@ -181,9 +189,31 @@ async function main(): Promise<void> {
           }
         }
 
+        const defByUri = new Map<string, LeaderboardDefinitionRecord>();
         for (const rec of recordsToCheck) {
           const hydrated = jsonToLex(rec.value as Record<string, unknown>);
           lex.assertValidRecord(rec.nsid, hydrated);
+
+          if (rec.nsid === NSIDS.LeaderboardDefinition) {
+            const def = rec.value as LeaderboardDefinitionRecord;
+            const defErr = validateComponentDefs(def.components, def.componentOrder);
+            if (defErr) {
+              throw new Error(`${rec.label}: ${defErr}`);
+            }
+            defByUri.set(rec.label, def);
+          }
+        }
+        for (const rec of recordsToCheck) {
+          if (rec.nsid === NSIDS.LeaderboardScore) {
+            const scoreRec = rec.value as { leaderboard?: string; components?: ScoreComponentValMap };
+            const def = scoreRec.leaderboard ? defByUri.get(scoreRec.leaderboard) : undefined;
+            if (def) {
+              const compErr = validateScoreComponents(scoreRec.components, def);
+              if (compErr) {
+                throw new Error(`${rec.label}: ${compErr}`);
+              }
+            }
+          }
         }
         console.log(`Validated ${recordsToCheck.length} Open Gaming example records in ${path.basename(defaultExamples)}.`);
       }
@@ -198,6 +228,7 @@ async function main(): Promise<void> {
           player: { type: 'string' },
           issuer: { type: 'string' },
           game: { type: 'string' },
+          rkey: { type: 'string' },
           'private-key': { type: 'string' },
         },
       });
@@ -213,6 +244,7 @@ async function main(): Promise<void> {
         playerDid: values.player,
         issuerDid: values.issuer,
         game: values.game,
+        rkey: values.rkey,
         signingKey,
       });
       console.log(JSON.stringify(result, null, 2));
@@ -225,6 +257,9 @@ async function main(): Promise<void> {
         options: {
           leaderboard: { type: 'string' },
           score: { type: 'string' },
+          components: { type: 'string' },
+          version: { type: 'string' },
+          rkey: { type: 'string' },
           player: { type: 'string' },
           issuer: { type: 'string' },
           game: { type: 'string' },
@@ -234,19 +269,30 @@ async function main(): Promise<void> {
         },
       });
       const priv = values['private-key'] ?? process.env.OPENGAMING_PRIVATE_KEY;
-      if (!values.leaderboard || values.score === undefined || !values.player || !values.issuer || !priv) {
+      if (!values.leaderboard || (values.score === undefined && !values.components) || !values.player || !values.issuer || !priv) {
         throw new Error(
-          'Required: --leaderboard <at-uri> --score <int> --player <did> --issuer <did> --private-key <base64url>'
+          'Required: --leaderboard <at-uri> (--score <int> | --components <json>) --player <did> --issuer <did> --private-key <base64url>'
         );
       }
-      const parsedScore = Number.parseInt(values.score, 10);
-      if (!Number.isInteger(parsedScore)) {
+      const parsedScore = values.score !== undefined ? Number.parseInt(values.score, 10) : undefined;
+      if (values.score !== undefined && !Number.isInteger(parsedScore)) {
         throw new Error(`Invalid integer score: "${values.score}"`);
+      }
+      let parsedComponents: ScoreComponentValMap | undefined;
+      if (values.components) {
+        const rawComp = JSON.parse(values.components) as unknown;
+        if (!rawComp || typeof rawComp !== 'object' || Array.isArray(rawComp)) {
+          throw new Error('--components must be a JSON dictionary object keyed by component id (not an array).');
+        }
+        parsedComponents = rawComp as ScoreComponentValMap;
       }
       const signingKey = await loadSigningKey(priv);
       const result = await createSignedScore({
         leaderboard: values.leaderboard,
         score: parsedScore,
+        components: parsedComponents,
+        version: values.version,
+        rkey: values.rkey,
         playerDid: values.player,
         issuerDid: values.issuer,
         game: values.game,
@@ -264,9 +310,14 @@ async function main(): Promise<void> {
         options: {
           file: { type: 'string' },
           player: { type: 'string' },
+          'record-uri': { type: 'string' },
           issuer: { type: 'string' },
+          'trusted-issuers': { type: 'string' },
+          'allow-any-issuer': { type: 'boolean', default: false },
+          'allow-community-labels': { type: 'boolean', default: false },
           'public-key': { type: 'string' },
           revocations: { type: 'string' },
+          labels: { type: 'string' },
         },
       });
       if (!values.file || !values.player) {
@@ -274,18 +325,40 @@ async function main(): Promise<void> {
       }
       const parsed = JSON.parse(fs.readFileSync(path.resolve(values.file), 'utf8'));
       const record = parsed.record ?? parsed.value ?? parsed;
+      const recordUri = values['record-uri'] ?? parsed.uri;
+
       let revocations: RevocationRecord[] = [];
       if (values.revocations) {
         const revRaw = JSON.parse(fs.readFileSync(path.resolve(values.revocations), 'utf8'));
         const arr = Array.isArray(revRaw) ? revRaw : [revRaw];
         revocations = arr.map((item) => item.record ?? item.value ?? item);
       }
+
+      let activeLabels: AtprotoLabel[] = [];
+      if (values.labels) {
+        const lblRaw = JSON.parse(fs.readFileSync(path.resolve(values.labels), 'utf8'));
+        const arr = Array.isArray(lblRaw) ? lblRaw : [lblRaw];
+        activeLabels = resolveActiveLabels(arr);
+      }
+
+      const trustedIssuerDids = values['trusted-issuers']
+        ? values['trusted-issuers']
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+
       const verification = await verifyRecordAttestation({
         record,
         playerDid: values.player,
+        recordUri,
         expectedIssuerDid: values.issuer,
+        trustedIssuerDids,
+        allowAnyValidIssuer: values['allow-any-issuer'],
+        allowCommunityLabelVerification: values['allow-community-labels'],
         publicDidKey: values['public-key'],
         revocations,
+        activeLabels,
       });
       console.log(JSON.stringify(verification, null, 2));
       if (!verification.verified) {

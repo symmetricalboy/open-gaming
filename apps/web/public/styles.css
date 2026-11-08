@@ -806,6 +806,61 @@
       font-weight: 600;
       color: var(--text-muted);
     }
+    .table-wrapper td:nth-child(7)::before {
+      content: var(--label-7) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .table-wrapper td:nth-child(8)::before {
+      content: var(--label-8) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .table-wrapper td:nth-child(9)::before {
+      content: var(--label-9) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .table-wrapper td:nth-child(10)::before {
+      content: var(--label-10) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .table-wrapper td:nth-child(11)::before {
+      content: var(--label-11) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .table-wrapper td:nth-child(12)::before {
+      content: var(--label-12) ": ";
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+  }
+
+  .table-wrapper th.active-sort-col,
+  .table-wrapper td.active-sort-col {
+    background: color-mix(in srgb, var(--brand) 7%, transparent);
+  }
+
+  .badge-accent {
+    border-color: color-mix(in srgb, var(--brand) 45%, var(--border-subtle));
+    color: var(--brand);
+  }
+
+  .lexicon-summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .stack-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .single-col-grid {
+    grid-template-columns: 1fr;
   }
 
   /* Native Modal Dialogs (modern-web-guidance: dialog & light-dismiss-a-dialog) */
@@ -924,6 +979,27 @@
     font-family: var(--font-mono);
     font-weight: 800;
     font-size: 1.05rem;
+  }
+
+  .flex-1 {
+    flex: 1;
+  }
+
+  .space-between {
+    justify-content: space-between;
+  }
+
+  .card-footer-row {
+    justify-content: space-between;
+    margin-block-start: auto;
+  }
+
+  .mb-0 {
+    margin-block-end: 0;
+  }
+
+  .mb-sm {
+    margin-block-end: 0.85rem;
   }
 
   .visually-hidden:where(:not(:focus-within, :active)) {

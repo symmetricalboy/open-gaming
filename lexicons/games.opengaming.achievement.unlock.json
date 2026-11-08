@@ -1,11 +1,11 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.achievement.unlock",
-  "description": "A signed receipt stored in a player's repository confirming they unlocked a game achievement.",
+  "description": "A receipt stored in a player's repository confirming they unlocked a game achievement.",
   "defs": {
     "main": {
       "type": "record",
-      "description": "Published in the player's own PDS when an achievement is earned. Display metadata lives on the game's `achievement.definition` record; legitimacy is proven via inline CID-first cryptographic `signatures` from the game publisher's `#attestations` DID key (and subject to `games.opengaming.revocation` records in the game's PDS).",
+      "description": "Published in the player's own PDS when an achievement is earned. Display metadata lives on the game's `achievement.definition` record; legitimacy is proven via optional inline CID-first cryptographic `signatures` (supporting publisher or federated `trustedIssuers` DID keys) and moderated via publisher `games.opengaming.revocation` records and/or ATProto Labelers (`com.atproto.label.defs#label`).",
       "key": "any",
       "record": {
         "type": "object",
@@ -44,7 +44,7 @@
           "signatures": {
             "type": "array",
             "maxLength": 8,
-            "description": "Inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`) signed by the game publisher's `#attestations` DID key over the repository-bound DAG-CBOR CID of this record. Unsigned records MUST be treated as unverified/self-reported, and records matching a publisher `games.opengaming.revocation` MUST be treated as revoked.",
+            "description": "Optional inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`) over the repository-bound DAG-CBOR CID of this record. Kept optional so clients can still write unlocks directly to the player's PDS in serverless or post-EoS environments.",
             "items": {
               "type": "union",
               "refs": [

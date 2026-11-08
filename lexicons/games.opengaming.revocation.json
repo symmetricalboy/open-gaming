@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Revokes inline cryptographic attestations previously signed by this game publisher. Must be published in the same repository (DID) that owns the referenced `subject` definition. For `scope: \"attestation\"`, set `rkey` to the `attestationCid` so lightweight clients can check revocation in O(1) via `com.atproto.repo.getRecord` and cheaters cannot evade revocation by copying a signed record to a new `rkey`. Deleting this record reinstates the revoked attestation(s).",
+      "description": "First-party publisher revocation record requiring zero separate Labeler infrastructure. Complements ATProto Labelers (`com.atproto.label.defs#label`, used for third-party/community anti-cheat & replay moderation) and `leaderboard.definition#rankedVersions` (preferred over `before` cutoffs for clean balance/chart version resets). For `scope: \"attestation\"`, set `rkey` to `attestationCid` for O(1) lookup via `com.atproto.repo.getRecord`. Deleting this record reinstates the revoked attestation(s).",
       "key": "any",
       "record": {
         "type": "object",
@@ -40,7 +40,7 @@
           "before": {
             "type": "string",
             "format": "datetime",
-            "description": "Optional cutoff timestamp for `achievement`, `leaderboard`, or `game` scopes. When set, only records with `unlockedAt` / `recordedAt` at or before `before` are revoked (e.g. invalidating pre-patch exploit runs while allowing fair post-patch play)."
+            "description": "Optional cutoff timestamp for `achievement`, `leaderboard`, or `game` scopes. Note: for non-adversarial chart or balance updates, prefer `leaderboard.definition#rankedVersions` so historical runs stay preserved rather than revoked."
           },
           "reason": {
             "type": "string",

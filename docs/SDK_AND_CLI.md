@@ -1,6 +1,6 @@
 # `@opengaming/sdk` & `opengaming` CLI Guide
 
-The `@opengaming/sdk` package provides everything needed to integrate Open Gaming (`games.opengaming.*`) into a game backend, client, or AppView — including P-256 key generation, PLC `#attestations` setup, Mode A inline signing & verification, `games.opengaming.revocation` management, per-game completion & profile aggregation, and leaderboard score windowing.
+The `@opengaming/sdk` package provides everything needed to integrate Open Gaming (`games.opengaming.*`) into a game backend, client, revival host, or AppView — including P-256 key generation, PLC `#attestations` setup, Mode A inline signing & verification (`rkey` binding, `trustedIssuers`, `replay` blobs), ATProto Labeler folding, `games.opengaming.revocation` management, multi-component leaderboard formatting/ranking, and XP-free Gamercard aggregation.
 
 ---
 
@@ -31,20 +31,35 @@ npx opengaming plc-register-key \
 npx opengaming validate
 ```
 
-### Sign & Verify Records from the Command Line
+### Sign & Verify Records (Classic & Multi-Component)
 ```bash
-# Sign an achievement unlock
+# Sign an achievement unlock (with optional --rkey anti-evasion binding)
 npx opengaming sign-unlock \
   --achievement "at://did:plc:game/games.opengaming.achievement.definition/first-flight" \
   --player "did:plc:player" \
   --issuer "did:plc:game" \
+  --rkey "first-flight-unlock" \
   --private-key "$OPENGAMING_PRIVATE_KEY" > unlock.json
 
-# Verify a signed unlock or score (optionally passing revocations)
-npx opengaming verify \
-  --file unlock.json \
+# Sign a multi-component rhythm/stage score map with a legal chart version hash
+npx opengaming sign-score \
+  --leaderboard "at://did:plc:game/games.opengaming.leaderboard.definition/rhythm-stage-1" \
+  --components '{"ex-score":{"$type":"games.opengaming.defs#pointsComponentVal","value":2840},"accuracy":{"$type":"games.opengaming.defs#percentageComponentVal","value":9942}}' \
+  --version "md5:8a4f2c91e0b3d71244f9a10293847561" \
+  --rkey "rhythm-pb-1" \
   --player "did:plc:player" \
-  --issuer "did:plc:game"
+  --issuer "did:plc:game" \
+  --private-key "$OPENGAMING_PRIVATE_KEY" > score.json
+
+# Verify a signed (or community-labeled) record with trusted federated issuers & ATProto labels
+npx opengaming verify \
+  --file score.json \
+  --player "did:plc:player" \
+  --record-uri "at://did:plc:player/games.opengaming.leaderboard.score/rhythm-pb-1" \
+  --issuer "did:plc:game" \
+  --trusted-issuers "did:web:revival.community.games" \
+  --allow-community-labels \
+  --labels ./labels.json
 ```
 
 ### Revoke or Reinstate Cheated / Exploited Records
@@ -57,17 +72,6 @@ npx opengaming revoke \
   --subject "at://did:plc:game/games.opengaming.leaderboard.definition/high-score" \
   --reason exploit \
   --note "Submitted via v1.0 pause-frame glitch" \
-  --publish \
-  --identifier mygame.bsky.social \
-  --password "$ATP_PASSWORD"
-
-# Scoped pre-patch cutoff revocation (invalidates scores before patch, allows post-patch scores)
-npx opengaming revoke \
-  --scope leaderboard \
-  --player "did:plc:cheater" \
-  --subject "at://did:plc:game/games.opengaming.leaderboard.definition/high-score" \
-  --before "2026-11-08T00:00:00.000Z" \
-  --reason bug \
   --publish \
   --identifier mygame.bsky.social \
   --password "$ATP_PASSWORD"
@@ -90,51 +94,51 @@ import {
   createSignedUnlock,
   createSignedScore,
   verifyRecordAttestation,
-  createRevocationRecord,
+  resolveActiveLabels,
+  getScoreSortMetric,
   evaluateScoreSubmission,
-  formatScore,
-  calculateGameCompletion,
-  summarizeActorProfile,
   getUnlockRkey,
 } from '@opengaming/sdk';
 
-// 1. Game server signs an achievement unlock for a player
 const signingKey = await loadSigningKey(process.env.OPENGAMING_PRIVATE_KEY!);
 
-const { record: signedUnlock, attestationCid } = await createSignedUnlock({
-  achievement: 'at://did:plc:flappysky/games.opengaming.achievement.definition/first-flight',
-  game: 'at://did:plc:flappysky/games.atmosphere.define/flappysky',
+// 1. Sign a multi-component score bound to player DID + target rkey
+const targetRkey = 'stage-1-pb';
+const { record: signedScore, attestationCid } = await createSignedScore({
+  leaderboard: 'at://did:plc:game/games.opengaming.leaderboard.definition/stage-1',
   playerDid: 'did:plc:player123',
-  issuerDid: 'did:plc:flappysky',
+  issuerDid: 'did:plc:game',
+  rkey: targetRkey,
+  components: {
+    'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 2840 },
+    accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9942 },
+    'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 124150 },
+  },
+  details: {
+    $type: 'games.opengaming.defs#judgmentBreakdown',
+    judgments: {
+      perfect: { total: 1400 },
+      great: { total: 40, early: 15, late: 25 },
+    },
+    judgmentOrder: ['perfect', 'great'],
+    maxCombo: 1440,
+  },
+  version: 'md5:8a4f2c91e0b3d71244f9a10293847561',
   signingKey,
 });
 
-// 2. Player's authenticated client writes the signed receipt to their own PDS
-await playerAgent.com.atproto.repo.putRecord({
-  repo: 'did:plc:player123',
-  collection: NSIDS.AchievementUnlock,
-  rkey: getUnlockRkey(signedUnlock.achievement),
-  record: signedUnlock,
-});
-
-// 3. Any AppView (like opengaming.games) verifies the signature & checks revocations
+// 2. Verify with multi-issuer federation, publisher revocations, and ATProto Labeler events
 const verification = await verifyRecordAttestation({
-  record: signedUnlock,
+  record: signedScore,
+  recordUri: `at://did:plc:player123/${NSIDS.LeaderboardScore}/${targetRkey}`,
   playerDid: 'did:plc:player123',
+  trustedIssuerDids: ['did:web:revival.community.games'],
+  allowCommunityLabelVerification: true,
   revocations: indexedPublisherRevocations,
+  activeLabels: resolveActiveLabels(labelEvents),
 });
 
 if (verification.verified) {
-  console.log('Verified unlock CID:', verification.attestationCid);
+  console.log('Verified CID:', verification.attestationCid, 'Issuer:', verification.issuerDid);
 }
-
-// 4. Revoke an exploited score or unlock on the Game's PDS
-const { rkey, record: revocation } = createRevocationRecord({
-  scope: 'attestation',
-  attestationCid,
-  player: 'did:plc:player123',
-  subject: signedUnlock.achievement,
-  reason: 'exploit',
-  note: 'Invalidated exploit run',
-});
 ```

@@ -5,11 +5,11 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Defines one leaderboard offered by a game (modeled on Google Play Games Services leaderboards and symmetrical with `games.opengaming.achievement.definition`). Publish in the game publisher's repository using a stable slug rkey (e.g. `high-score`, `most-likes`).",
+      "description": "Defines one leaderboard offered by a game. Supports both simple single-integer arcade/speedrun boards (`scoreFormat` + `sortOrder`) AND rich multi-component boards (`components` + `defaultComponent`, e.g. Points + Time + Grade + Clear Lamp), legal chart/patch version filtering (`rankedVersions`), and multi-issuer post-EoS federation (`trustedIssuers`).",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["game", "name", "icon", "sortOrder", "scoreFormat", "timeframes", "recordPolicy", "createdAt"],
+        "required": ["game", "name", "icon", "timeframes", "recordPolicy", "createdAt"],
         "properties": {
           "game": {
             "type": "string",
@@ -20,7 +20,7 @@
             "type": "string",
             "maxGraphemes": 100,
             "maxLength": 300,
-            "description": "Display name of the leaderboard (e.g. `High Scores`, `Fastest Clear`)."
+            "description": "Display name of the leaderboard (e.g. `High Scores`, `Fastest Clear`, ` Freedom Dive [FOUR DIMENSIONS]`)."
           },
           "description": {
             "type": "string",
@@ -32,7 +32,7 @@
             "type": "blob",
             "accept": ["image/png", "image/jpeg", "image/webp"],
             "maxSize": 1000000,
-            "description": "Required square icon representing this leaderboard (512x512 PNG or WebP recommended; avoid localized text inside the image)."
+            "description": "Required square icon or jacket art representing this leaderboard (512x512 PNG or WebP recommended)."
           },
           "iconAlt": {
             "type": "string",
@@ -44,18 +44,64 @@
             "type": "string",
             "maxLength": 32,
             "knownValues": ["largerIsBetter", "smallerIsBetter"],
-            "description": "Ranking direction. `largerIsBetter` for points/collectibles; `smallerIsBetter` for speedruns/elapsed time. Once published, `sortOrder` SHOULD NOT be changed."
+            "default": "largerIsBetter",
+            "description": "Primary ranking direction for single-metric boards (`largerIsBetter` for points; `smallerIsBetter` for speedruns)."
           },
           "scoreFormat": {
             "type": "ref",
             "ref": "games.opengaming.defs#scoreFormat",
-            "description": "How raw integer score values are formatted (`numeric`, `time`, or `currency`)."
+            "description": "Formatting rules for single-value integer scores (`numeric`, `time`, or `currency`). Optional when `components` defines structured multi-component columns."
+          },
+          "components": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#scoreComponentDefMap",
+            "description": "Optional dictionary map of component key (`record-key`, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to typed component definition (`#pointsComponentDef`, `#percentageComponentDef`, `#timeComponentDef`, `#enumComponentDef`, `#textComponentDef`). Forward-compatible with the proposed Lexicon `map` type."
+          },
+          "componentOrder": {
+            "type": "array",
+            "minLength": 1,
+            "maxLength": 16,
+            "description": "Optional explicit display order of component keys in `components` (e.g. `[\"ex-score\", \"accuracy\", \"lamp\", \"clear-time\"]`). Preserves author-intended column order across DAG-CBOR canonical map-key sorting.",
+            "items": {
+              "type": "string",
+              "format": "record-key",
+              "maxLength": 32
+            }
+          },
+          "defaultComponent": {
+            "type": "string",
+            "format": "record-key",
+            "maxLength": 32,
+            "description": "Key in `components` used as the default ranking column when `components` is present."
+          },
+          "detailsSchema": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional Lexicon `$type` or NSID hint indicating the structured breakdown object expected in `leaderboard.score#details` (e.g. `games.opengaming.defs#judgmentBreakdown` or a genre-specific lexicon)."
+          },
+          "rankedVersions": {
+            "type": "array",
+            "maxLength": 64,
+            "description": "Optional list of leaderboard-legal chart, map, or game-build hashes/identifiers (e.g. MD5/SHA-256 hex digest of a chart file). When non-empty, active rankings filter out scores whose `version` is not in `rankedVersions`—preserving pre-patch runs in player PDSs without revoking them as cheated.",
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "trustedIssuers": {
+            "type": "array",
+            "maxLength": 32,
+            "description": "Optional list of additional DIDs authorized to sign score attestations for this leaderboard (e.g. federated tournament hosts or post-EoS community revival instances).",
+            "items": {
+              "type": "string",
+              "format": "did"
+            }
           },
           "timeframes": {
             "type": "array",
             "minLength": 1,
             "maxLength": 3,
-            "description": "Which leaderboard time windows this game tracks and displays for this board (e.g. `[\"allTime\"]` for a single permanent board, or `[\"daily\", \"weekly\", \"allTime\"]` for rotating + historical boards).",
+            "description": "Which leaderboard time windows this game tracks and displays for this board (`daily`, `weekly`, `allTime`).",
             "items": {
               "type": "string",
               "maxLength": 32,
@@ -66,15 +112,15 @@
             "type": "string",
             "maxLength": 32,
             "knownValues": ["bestOnly", "perWindowBest", "everyRun"],
-            "description": "Controls how player `leaderboard.score` records are written for this board: `bestOnly` overwrites a single personal-best record per player (ideal when `timeframes` is `[\"allTime\"]`); `perWindowBest` appends a timestamped record whenever beating the player's active Daily, Weekly, or All-Time best; `everyRun` appends a record for every completed run."
+            "description": "Controls how player `leaderboard.score` records are written: `bestOnly`, `perWindowBest`, or `everyRun`."
           },
           "scoreMin": {
             "type": "integer",
-            "description": "Optional minimum valid raw score. Indexers and AppViews MUST discard score submissions below `scoreMin`."
+            "description": "Optional minimum valid raw headline score."
           },
           "scoreMax": {
             "type": "integer",
-            "description": "Optional maximum valid raw score. Indexers and AppViews MUST discard clearly fraudulent submissions above `scoreMax`."
+            "description": "Optional maximum valid raw headline score."
           },
           "listOrder": {
             "type": "integer",

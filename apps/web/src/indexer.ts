@@ -1,9 +1,15 @@
 import {
   NSIDS,
+  getRecordLabelValues,
+  getScoreSortMetric,
+  resolveActiveLabels,
+  validateComponentDefs,
+  validateScoreComponents,
   verifyRecordAttestation,
   type AchievementDefinitionRecord,
   type AchievementProgressRecord,
   type AchievementUnlockRecord,
+  type AtprotoLabel,
   type LeaderboardDefinitionRecord,
   type LeaderboardScoreRecord,
   type RevocationRecord,
@@ -64,16 +70,123 @@ export class OpenGamingIndexer {
     private identity: IdentityService
   ) {}
 
-  getPublisherRevocations(publisherDid: string): RevocationWithOrigin[] {
+  getPublisherRevocations(publisherDids: string | string[]): RevocationWithOrigin[] {
+    const list = (Array.isArray(publisherDids) ? publisherDids : [publisherDids]).filter(Boolean);
+    if (list.length === 0) return [];
+    const placeholders = list.map(() => '?').join(', ');
     const rows = this.db
-      .prepare('SELECT uri, publisher_did, raw_json FROM revocations WHERE publisher_did = ?')
-      .all(publisherDid) as Array<{ uri: string; publisher_did: string; raw_json: string }>;
+      .prepare(`SELECT uri, publisher_did, raw_json FROM revocations WHERE publisher_did IN (${placeholders})`)
+      .all(...list) as Array<{ uri: string; publisher_did: string; raw_json: string }>;
 
     return rows.map((r) => ({
       uri: r.uri,
       publisherDid: r.publisher_did,
       value: JSON.parse(r.raw_json) as RevocationRecord,
     }));
+  }
+
+  getActiveModerationLabels(targetUris?: string[]): AtprotoLabel[] {
+    const rows =
+      targetUris && targetUris.length > 0
+        ? (this.db
+            .prepare(
+              `SELECT src, uri, cid, val, neg, cts, exp
+               FROM moderation_labels
+               WHERE uri IN (${targetUris.map(() => '?').join(', ')})`
+            )
+            .all(...targetUris) as Array<Record<string, any>>)
+        : (this.db
+            .prepare('SELECT src, uri, cid, val, neg, cts, exp FROM moderation_labels')
+            .all() as Array<Record<string, any>>);
+
+    const events: AtprotoLabel[] = rows.map((r) => ({
+      src: String(r.src),
+      uri: String(r.uri),
+      ...(r.cid ? { cid: String(r.cid) } : {}),
+      val: String(r.val),
+      neg: Number(r.neg) === 1,
+      cts: String(r.cts),
+      ...(r.exp ? { exp: String(r.exp) } : {}),
+    }));
+
+    return resolveActiveLabels(events);
+  }
+
+  /**
+   * Ingest an ATProto `com.atproto.label.defs#label` event (anti-cheat moderation or post-EoS
+   * replay verification) and reactively re-evaluate affected player records.
+   */
+  async ingestLabel(label: AtprotoLabel): Promise<void> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO moderation_labels (src, uri, cid, val, neg, cts, exp, indexed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(src, uri, cid, val) DO UPDATE SET
+           neg = excluded.neg,
+           cts = excluded.cts,
+           exp = excluded.exp,
+           indexed_at = excluded.indexed_at`
+      )
+      .run(
+        label.src,
+        label.uri,
+        label.cid ?? '',
+        label.val,
+        label.neg ? 1 : 0,
+        label.cts ?? now,
+        label.exp ?? null,
+        now
+      );
+
+    await this.revalidateLabeledRecords(label.uri);
+  }
+
+  async revalidateLabeledRecords(targetUriOrDid: string): Promise<void> {
+    const now = new Date().toISOString();
+    const isDid = targetUriOrDid.startsWith('did:');
+
+    const unlocks = (
+      isDid
+        ? this.db
+            .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM achievement_unlocks WHERE player_did = ?')
+            .all(targetUriOrDid)
+        : this.db
+            .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM achievement_unlocks WHERE uri = ?')
+            .all(targetUriOrDid)
+    ) as Array<{ uri: string; player_did: string; rkey: string; raw_json: string; is_demo: number }>;
+
+    for (const u of unlocks) {
+      await this.indexUnlockRecord({
+        uri: u.uri,
+        did: u.player_did,
+        rkey: u.rkey,
+        record: JSON.parse(u.raw_json) as AchievementUnlockRecord,
+        isDemo: u.is_demo === 1,
+        now,
+      });
+    }
+
+    const scores = (
+      isDid
+        ? this.db
+            .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM leaderboard_scores WHERE player_did = ?')
+            .all(targetUriOrDid)
+        : this.db
+            .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM leaderboard_scores WHERE uri = ?')
+            .all(targetUriOrDid)
+    ) as Array<{ uri: string; player_did: string; rkey: string; raw_json: string; is_demo: number }>;
+
+    for (const s of scores) {
+      await this.indexScoreRecord({
+        uri: s.uri,
+        did: s.player_did,
+        rkey: s.rkey,
+        record: JSON.parse(s.raw_json) as LeaderboardScoreRecord,
+        isDemo: s.is_demo === 1,
+        now,
+      });
+    }
   }
 
   async indexRecord({
@@ -98,7 +211,6 @@ export class OpenGamingIndexer {
     const now = new Date().toISOString();
     const rawJson = JSON.stringify(record);
 
-    // Ensure actor entry exists in SQLite (non-blocking cache lookup or lightweight insert)
     if (!this.identity.getCachedActor(did)) {
       this.identity.upsertActor({ did, isDemo });
     }
@@ -165,21 +277,37 @@ export class OpenGamingIndexer {
 
       case NSIDS.AchievementDefinition: {
         const def = record as AchievementDefinitionRecord;
-        if (!def.game || !def.title || !def.description) {
-          return { indexed: false, collection, error: 'Missing required achievement.definition fields' };
+        if (!def.game) {
+          return { indexed: false, collection, error: 'Missing required achievement.definition game field' };
         }
+        // Non-hidden achievements must specify title and description; hidden stubs may omit them to prevent PDS spoiler leaks
+        if (!def.hidden && (!def.title || !def.description)) {
+          return { indexed: false, collection, error: 'Visible achievement.definition requires title and description' };
+        }
+
+        const isRedactedStub = Boolean(def.hidden && (!def.title || !def.description));
+        const storedTitle = def.title ?? 'Hidden Achievement';
+        const storedDesc =
+          def.description ??
+          (def.hiddenSpace
+            ? 'Spoiler-protected stub — full achievement details unlock inside the game ATProto Space.'
+            : 'Keep playing to discover and unlock this hidden milestone.');
+
         const iconBlob = extractBlobInfo(def.icon);
         const lockedBlob = extractBlobInfo(def.lockedIcon);
-        const iconUrl = iconUrlOverride ?? makeBlobProxyUrl(did, iconBlob.cid);
+        const iconUrl =
+          iconUrlOverride ??
+          makeBlobProxyUrl(did, iconBlob.cid ?? lockedBlob.cid);
 
         this.db
           .prepare(
             `INSERT INTO achievement_definitions (
                uri, publisher_did, rkey, cid, game_uri, title, description, requirement,
                icon_url, icon_cid, icon_mime, icon_alt, locked_icon_cid, locked_icon_mime,
-               tier, hidden, steps_needed, group_name, list_order, badge_uri, created_at,
+               tier, hidden, hidden_space, is_redacted_stub, trusted_issuers_json,
+               steps_needed, group_name, list_order, badge_uri, created_at,
                raw_json, is_demo
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(uri) DO UPDATE SET
                cid = excluded.cid,
                game_uri = excluded.game_uri,
@@ -194,6 +322,9 @@ export class OpenGamingIndexer {
                locked_icon_mime = excluded.locked_icon_mime,
                tier = excluded.tier,
                hidden = excluded.hidden,
+               hidden_space = excluded.hidden_space,
+               is_redacted_stub = excluded.is_redacted_stub,
+               trusted_issuers_json = excluded.trusted_issuers_json,
                steps_needed = excluded.steps_needed,
                group_name = excluded.group_name,
                list_order = excluded.list_order,
@@ -206,8 +337,8 @@ export class OpenGamingIndexer {
             rkey,
             cid ?? null,
             def.game,
-            def.title,
-            def.description,
+            storedTitle,
+            storedDesc,
             def.requirement ?? null,
             iconUrl,
             iconBlob.cid ?? null,
@@ -217,6 +348,9 @@ export class OpenGamingIndexer {
             lockedBlob.mimeType ?? null,
             def.tier ?? null,
             def.hidden ? 1 : 0,
+            def.hiddenSpace ?? null,
+            isRedactedStub ? 1 : 0,
+            def.trustedIssuers ? JSON.stringify(def.trustedIssuers) : null,
             typeof def.stepsNeeded === 'number' ? Math.trunc(def.stepsNeeded) : null,
             def.group ?? null,
             typeof def.listOrder === 'number' ? Math.trunc(def.listOrder) : null,
@@ -231,20 +365,34 @@ export class OpenGamingIndexer {
 
       case NSIDS.LeaderboardDefinition: {
         const def = record as LeaderboardDefinitionRecord;
-        if (!def.game || !def.name || !def.sortOrder || !def.scoreFormat || !def.timeframes || !def.recordPolicy) {
+        const hasComponents = Boolean(
+          def.components &&
+            typeof def.components === 'object' &&
+            !Array.isArray(def.components) &&
+            Object.keys(def.components).length > 0
+        );
+        const hasScoreConfig = Boolean(def.scoreFormat || hasComponents);
+        if (!def.game || !def.name || !hasScoreConfig || !def.timeframes || !def.recordPolicy) {
           return { indexed: false, collection, error: 'Missing required leaderboard.definition fields' };
+        }
+        const compDefErr = validateComponentDefs(def.components, def.componentOrder);
+        if (compDefErr) {
+          return { indexed: false, collection, error: compDefErr };
         }
         const iconBlob = extractBlobInfo(def.icon);
         const iconUrl = iconUrlOverride ?? makeBlobProxyUrl(did, iconBlob.cid);
+        const sortOrder = def.sortOrder ?? 'largerIsBetter';
+        const scoreFormat = def.scoreFormat ?? { kind: 'numeric', decimalPlaces: 0 };
 
         this.db
           .prepare(
             `INSERT INTO leaderboard_definitions (
                uri, publisher_did, rkey, cid, game_uri, name, description,
                icon_url, icon_cid, icon_mime, icon_alt, sort_order, score_format_json,
-               timeframes_json, record_policy, score_min, score_max, list_order,
-               created_at, raw_json, is_demo
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               components_json, default_component, details_schema, ranked_versions_json,
+               trusted_issuers_json, timeframes_json, record_policy, score_min, score_max,
+               list_order, created_at, raw_json, is_demo
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(uri) DO UPDATE SET
                cid = excluded.cid,
                game_uri = excluded.game_uri,
@@ -256,6 +404,11 @@ export class OpenGamingIndexer {
                icon_alt = excluded.icon_alt,
                sort_order = excluded.sort_order,
                score_format_json = excluded.score_format_json,
+               components_json = excluded.components_json,
+               default_component = excluded.default_component,
+               details_schema = excluded.details_schema,
+               ranked_versions_json = excluded.ranked_versions_json,
+               trusted_issuers_json = excluded.trusted_issuers_json,
                timeframes_json = excluded.timeframes_json,
                record_policy = excluded.record_policy,
                score_min = excluded.score_min,
@@ -275,8 +428,13 @@ export class OpenGamingIndexer {
             iconBlob.cid ?? null,
             iconBlob.mimeType ?? null,
             def.iconAlt ?? null,
-            def.sortOrder,
-            JSON.stringify(def.scoreFormat),
+            sortOrder,
+            JSON.stringify(scoreFormat),
+            def.components ? JSON.stringify(def.components) : null,
+            def.defaultComponent ?? null,
+            def.detailsSchema ?? null,
+            def.rankedVersions ? JSON.stringify(def.rankedVersions) : null,
+            def.trustedIssuers ? JSON.stringify(def.trustedIssuers) : null,
             JSON.stringify(def.timeframes),
             def.recordPolicy,
             typeof def.scoreMin === 'number' ? Math.trunc(def.scoreMin) : null,
@@ -291,7 +449,7 @@ export class OpenGamingIndexer {
       }
 
       case NSIDS.AchievementUnlock: {
-        return this.indexUnlockRecord({ uri, did, rkey, record: record as AchievementUnlockRecord, isDemo, now });
+        return this.indexUnlockRecord({ uri, cid, did, rkey, record: record as AchievementUnlockRecord, isDemo, now });
       }
 
       case NSIDS.AchievementProgress: {
@@ -300,16 +458,28 @@ export class OpenGamingIndexer {
           return { indexed: false, collection, error: 'Invalid achievement.progress record' };
         }
         const achParsed = parseAtUri(prog.achievement);
+        const defRow = this.db
+          .prepare('SELECT game_uri, steps_needed, trusted_issuers_json FROM achievement_definitions WHERE uri = ?')
+          .get(prog.achievement) as
+          | { game_uri?: string; steps_needed?: number; trusted_issuers_json?: string | null }
+          | undefined;
+
+        const trustedIssuers: string[] = defRow?.trusted_issuers_json
+          ? JSON.parse(defRow.trusted_issuers_json)
+          : [];
+
         let verified = 0;
         let attestationCid: string | null = null;
 
         if (Array.isArray(prog.signatures) && prog.signatures.length > 0 && achParsed) {
-          const revocations = this.getPublisherRevocations(achParsed.did);
+          const revocations = this.getPublisherRevocations([achParsed.did, ...trustedIssuers]);
           const v = await verifyRecordAttestation({
             record: prog,
             playerDid: did,
             recordUri: uri,
+            recordCid: cid,
             expectedIssuerDid: achParsed.did,
+            trustedIssuerDids: trustedIssuers,
             revocations,
             resolveDidDoc: (issuer) => this.identity.resolveDidDocument(issuer),
           });
@@ -319,17 +489,15 @@ export class OpenGamingIndexer {
           }
         }
 
-        const defRow = this.db
-          .prepare('SELECT game_uri, steps_needed FROM achievement_definitions WHERE uri = ?')
-          .get(prog.achievement) as { game_uri?: string; steps_needed?: number } | undefined;
-
         this.db
           .prepare(
             `INSERT INTO achievement_progress (
-               uri, player_did, rkey, achievement_uri, game_uri, current_steps, steps_needed,
-               updated_at, verified, attestation_cid, raw_json, indexed_at, is_demo
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               uri, player_did, rkey, achievement_uri, definition_cid, game_uri,
+               current_steps, steps_needed, updated_at, verified, attestation_cid,
+               raw_json, indexed_at, is_demo
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(uri) DO UPDATE SET
+               definition_cid = excluded.definition_cid,
                current_steps = excluded.current_steps,
                steps_needed = excluded.steps_needed,
                updated_at = excluded.updated_at,
@@ -343,6 +511,7 @@ export class OpenGamingIndexer {
             did,
             rkey,
             prog.achievement,
+            prog.definitionCid ?? null,
             prog.game ?? defRow?.game_uri ?? null,
             Math.max(0, Math.trunc(prog.currentSteps)),
             prog.stepsNeeded ?? defRow?.steps_needed ?? null,
@@ -358,7 +527,7 @@ export class OpenGamingIndexer {
       }
 
       case NSIDS.LeaderboardScore: {
-        return this.indexScoreRecord({ uri, did, rkey, record: record as LeaderboardScoreRecord, isDemo, now });
+        return this.indexScoreRecord({ uri, cid, did, rkey, record: record as LeaderboardScoreRecord, isDemo, now });
       }
 
       case NSIDS.Revocation: {
@@ -367,9 +536,26 @@ export class OpenGamingIndexer {
           return { indexed: false, collection, error: 'Missing required revocation fields' };
         }
         const subjectParsed = parseAtUri(rev.subject);
-        // Publisher authority check: publisher DID must match subject's DID!
-        if (!subjectParsed || subjectParsed.did !== did) {
-          return { indexed: false, collection, error: 'Revocation publisher DID does not own subject URI' };
+        if (!subjectParsed) {
+          return { indexed: false, collection, error: 'Invalid revocation subject URI' };
+        }
+        // Authority check: publisher DID must either own subject URI OR be listed in subject's trustedIssuers!
+        let isAuthorizedIssuer = subjectParsed.did === did;
+        if (!isAuthorizedIssuer) {
+          const lbTrusted = this.db
+            .prepare('SELECT trusted_issuers_json FROM leaderboard_definitions WHERE uri = ?')
+            .get(rev.subject) as { trusted_issuers_json?: string | null } | undefined;
+          const achTrusted = this.db
+            .prepare('SELECT trusted_issuers_json FROM achievement_definitions WHERE uri = ?')
+            .get(rev.subject) as { trusted_issuers_json?: string | null } | undefined;
+          const rawList = lbTrusted?.trusted_issuers_json ?? achTrusted?.trusted_issuers_json;
+          if (rawList) {
+            const parsedList = JSON.parse(rawList) as string[];
+            isAuthorizedIssuer = parsedList.includes(did);
+          }
+        }
+        if (!isAuthorizedIssuer) {
+          return { indexed: false, collection, error: 'Revocation publisher DID is not authorized for subject URI' };
         }
 
         this.db
@@ -409,8 +595,7 @@ export class OpenGamingIndexer {
             isDemo ? 1 : 0
           );
 
-        // Immediately re-evaluate stored unlocks & scores for this publisher!
-        await this.revalidatePublisherRecords(did);
+        await this.revalidatePublisherRecords(did, subjectParsed.did);
         return { indexed: true, collection };
       }
 
@@ -421,6 +606,7 @@ export class OpenGamingIndexer {
 
   private async indexUnlockRecord({
     uri,
+    cid,
     did,
     rkey,
     record,
@@ -428,6 +614,7 @@ export class OpenGamingIndexer {
     now,
   }: {
     uri: string;
+    cid?: string;
     did: string;
     rkey: string;
     record: AchievementUnlockRecord;
@@ -446,24 +633,45 @@ export class OpenGamingIndexer {
 
     const achParsed = parseAtUri(record.achievement);
     const publisherDid = achParsed?.did;
-    const revocations = publisherDid ? this.getPublisherRevocations(publisherDid) : [];
+    const defRow = this.db
+      .prepare('SELECT game_uri, trusted_issuers_json FROM achievement_definitions WHERE uri = ?')
+      .get(record.achievement) as { game_uri?: string; trusted_issuers_json?: string | null } | undefined;
+
+    const trustedIssuers: string[] = defRow?.trusted_issuers_json
+      ? JSON.parse(defRow.trusted_issuers_json)
+      : [];
+
+    const revocations = this.getPublisherRevocations([publisherDid ?? '', ...trustedIssuers]);
+    const activeLabels = this.getActiveModerationLabels([uri, did]);
+    const activeLabelVals = getRecordLabelValues({
+      recordUri: uri,
+      recordCid: cid,
+      playerDid: did,
+      activeLabels,
+    });
 
     const verification = await verifyRecordAttestation({
       record,
       playerDid: did,
       recordUri: uri,
+      recordCid: cid,
       expectedIssuerDid: publisherDid,
+      trustedIssuerDids: trustedIssuers,
+      allowCommunityLabelVerification: true,
       revocations,
+      activeLabels,
       resolveDidDoc: (issuer) => this.identity.resolveDidDocument(issuer),
     });
 
-    const defRow = this.db
-      .prepare('SELECT game_uri FROM achievement_definitions WHERE uri = ?')
-      .get(record.achievement) as { game_uri?: string } | undefined;
-
     const isVerified = verification.verified ? 1 : 0;
-    const isRevoked = !verification.verified && verification.error === 'revoked' ? 1 : 0;
-    const revocationReason = !verification.verified ? verification.revocation?.reason ?? null : null;
+    const isLabelInvalidated = !verification.verified && verification.error === 'label_invalidated' ? 1 : 0;
+    const isRevoked =
+      !verification.verified && (verification.error === 'revoked' || verification.error === 'label_invalidated')
+        ? 1
+        : 0;
+    const revocationReason = !verification.verified
+      ? verification.revocation?.reason ?? (isLabelInvalidated ? verification.labels?.[0]?.val ?? 'labeled' : null)
+      : null;
     const verificationError = !verification.verified ? verification.error : null;
     const verificationMessage = !verification.verified ? verification.message : null;
     const issuerDid = verification.issuerDid ?? publisherDid ?? null;
@@ -475,8 +683,9 @@ export class OpenGamingIndexer {
         `INSERT INTO achievement_unlocks (
            uri, player_did, rkey, achievement_uri, game_uri, unlocked_at, steps_completed,
            verified, verification_error, verification_message, issuer_did, key_id,
-           attestation_cid, revoked, revocation_reason, raw_json, indexed_at, is_demo
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           attestation_cid, revoked, revocation_reason, label_invalidated, active_labels_json,
+           raw_json, indexed_at, is_demo
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(uri) DO UPDATE SET
            achievement_uri = excluded.achievement_uri,
            game_uri = COALESCE(excluded.game_uri, achievement_unlocks.game_uri),
@@ -490,6 +699,8 @@ export class OpenGamingIndexer {
            attestation_cid = excluded.attestation_cid,
            revoked = excluded.revoked,
            revocation_reason = excluded.revocation_reason,
+           label_invalidated = excluded.label_invalidated,
+           active_labels_json = excluded.active_labels_json,
            raw_json = excluded.raw_json,
            indexed_at = excluded.indexed_at`
       )
@@ -509,6 +720,8 @@ export class OpenGamingIndexer {
         attestationCid,
         isRevoked,
         revocationReason,
+        isLabelInvalidated,
+        activeLabelVals.length > 0 ? JSON.stringify(activeLabelVals) : null,
         JSON.stringify(record),
         now,
         isDemo ? 1 : 0
@@ -525,6 +738,7 @@ export class OpenGamingIndexer {
 
   private async indexScoreRecord({
     uri,
+    cid,
     did,
     rkey,
     record,
@@ -532,53 +746,96 @@ export class OpenGamingIndexer {
     now,
   }: {
     uri: string;
+    cid?: string;
     did: string;
     rkey: string;
     record: LeaderboardScoreRecord;
     isDemo: boolean;
     now: string;
   }): Promise<{ indexed: boolean; collection: string; verified: boolean; revoked: boolean; error?: string }> {
-    if (!record.leaderboard || typeof record.score !== 'number' || !Number.isInteger(record.score) || !record.recordedAt) {
+    const hasNumericScore = typeof record.score === 'number' && Number.isInteger(record.score);
+    const hasComponents = Boolean(
+      record.components &&
+        typeof record.components === 'object' &&
+        !Array.isArray(record.components) &&
+        Object.keys(record.components).length > 0
+    );
+
+    if (!record.leaderboard || (!hasNumericScore && !hasComponents) || !record.recordedAt) {
       return {
         indexed: false,
         collection: NSIDS.LeaderboardScore,
         verified: false,
         revoked: false,
-        error: 'Missing leaderboard, integer score, or recordedAt',
+        error: 'Missing leaderboard, integer score (or components), or recordedAt',
       };
     }
 
     const lbParsed = parseAtUri(record.leaderboard);
     const publisherDid = lbParsed?.did;
-    const revocations = publisherDid ? this.getPublisherRevocations(publisherDid) : [];
 
     const defRow = this.db
-      .prepare('SELECT game_uri, score_min, score_max FROM leaderboard_definitions WHERE uri = ?')
-      .get(record.leaderboard) as { game_uri?: string; score_min?: number | null; score_max?: number | null } | undefined;
+      .prepare('SELECT * FROM leaderboard_definitions WHERE uri = ?')
+      .get(record.leaderboard) as Record<string, any> | undefined;
 
-    const outOfBounds =
-      (defRow?.score_min !== null && defRow?.score_min !== undefined && record.score < defRow.score_min) ||
-      (defRow?.score_max !== null && defRow?.score_max !== undefined && record.score > defRow.score_max);
+    const parsedDef: LeaderboardDefinitionRecord | undefined = defRow?.raw_json
+      ? (JSON.parse(String(defRow.raw_json)) as LeaderboardDefinitionRecord)
+      : undefined;
+
+    const trustedIssuers: string[] = defRow?.trusted_issuers_json
+      ? JSON.parse(String(defRow.trusted_issuers_json))
+      : [];
+
+    const revocations = this.getPublisherRevocations([publisherDid ?? '', ...trustedIssuers]);
+    const activeLabels = this.getActiveModerationLabels([uri, did]);
+    const activeLabelVals = getRecordLabelValues({
+      recordUri: uri,
+      recordCid: cid,
+      playerDid: did,
+      activeLabels,
+    });
+
+    const metric = parsedDef ? getScoreSortMetric(record, parsedDef) : null;
+    const effectiveScore = hasNumericScore ? record.score! : metric?.sortableValue ?? 0;
+
+    const componentValidationError = parsedDef ? validateScoreComponents(record.components, parsedDef) : null;
+    const outOfHeadlineBounds =
+      hasNumericScore &&
+      ((defRow?.score_min !== null && defRow?.score_min !== undefined && record.score! < Number(defRow.score_min)) ||
+        (defRow?.score_max !== null && defRow?.score_max !== undefined && record.score! > Number(defRow.score_max)));
+
+    const outOfBounds = outOfHeadlineBounds || Boolean(componentValidationError);
 
     const verification = await verifyRecordAttestation({
       record,
       playerDid: did,
       recordUri: uri,
+      recordCid: cid,
       expectedIssuerDid: publisherDid,
+      trustedIssuerDids: trustedIssuers,
+      allowCommunityLabelVerification: true,
       revocations,
+      activeLabels,
       resolveDidDoc: (issuer) => this.identity.resolveDidDocument(issuer),
     });
 
     const isVerified = verification.verified && !outOfBounds ? 1 : 0;
-    const isRevoked = !verification.verified && verification.error === 'revoked' ? 1 : 0;
-    const revocationReason = !verification.verified ? verification.revocation?.reason ?? null : null;
+    const isLabelInvalidated = !verification.verified && verification.error === 'label_invalidated' ? 1 : 0;
+    const isRevoked =
+      !verification.verified && (verification.error === 'revoked' || verification.error === 'label_invalidated')
+        ? 1
+        : 0;
+    const revocationReason = !verification.verified
+      ? verification.revocation?.reason ?? (isLabelInvalidated ? verification.labels?.[0]?.val ?? 'labeled' : null)
+      : null;
     const verificationError = outOfBounds
       ? 'out_of_bounds'
       : !verification.verified
         ? verification.error
         : null;
     const verificationMessage = outOfBounds
-      ? `Score ${record.score} falls outside leaderboard bounds [${defRow?.score_min ?? '-∞'}, ${defRow?.score_max ?? '+∞'}].`
+      ? componentValidationError ??
+        `Score ${effectiveScore} falls outside leaderboard bounds [${defRow?.score_min ?? '-∞'}, ${defRow?.score_max ?? '+∞'}].`
       : !verification.verified
         ? verification.message
         : null;
@@ -586,18 +843,27 @@ export class OpenGamingIndexer {
     const keyId = verification.verified ? verification.keyId : record.signatures?.[0]?.key ?? null;
     const attestationCid = verification.attestationCid ?? record.signatures?.[0]?.cid ?? null;
 
+    const replayBlob = extractBlobInfo(record.replay);
+
     this.db
       .prepare(
         `INSERT INTO leaderboard_scores (
-           uri, player_did, rkey, leaderboard_uri, game_uri, score, display_score, tag,
+           uri, player_did, rkey, leaderboard_uri, game_uri, score, display_score,
+           components_json, details_json, version, replay_cid, replay_mime, tag,
            recorded_at, verified, verification_error, verification_message, issuer_did,
-           key_id, attestation_cid, revoked, revocation_reason, raw_json, indexed_at, is_demo
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           key_id, attestation_cid, revoked, revocation_reason, label_invalidated,
+           active_labels_json, raw_json, indexed_at, is_demo
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(uri) DO UPDATE SET
            leaderboard_uri = excluded.leaderboard_uri,
            game_uri = COALESCE(excluded.game_uri, leaderboard_scores.game_uri),
            score = excluded.score,
            display_score = excluded.display_score,
+           components_json = excluded.components_json,
+           details_json = excluded.details_json,
+           version = excluded.version,
+           replay_cid = excluded.replay_cid,
+           replay_mime = excluded.replay_mime,
            tag = excluded.tag,
            recorded_at = excluded.recorded_at,
            verified = excluded.verified,
@@ -608,6 +874,8 @@ export class OpenGamingIndexer {
            attestation_cid = excluded.attestation_cid,
            revoked = excluded.revoked,
            revocation_reason = excluded.revocation_reason,
+           label_invalidated = excluded.label_invalidated,
+           active_labels_json = excluded.active_labels_json,
            raw_json = excluded.raw_json,
            indexed_at = excluded.indexed_at`
       )
@@ -616,9 +884,14 @@ export class OpenGamingIndexer {
         did,
         rkey,
         record.leaderboard,
-        record.game ?? defRow?.game_uri ?? null,
-        record.score,
+        record.game ?? (defRow?.game_uri ? String(defRow.game_uri) : null),
+        effectiveScore,
         record.displayScore ?? null,
+        record.components ? JSON.stringify(record.components) : null,
+        record.details ? JSON.stringify(record.details) : null,
+        record.version ?? null,
+        replayBlob.cid ?? null,
+        replayBlob.mimeType ?? null,
         record.tag ?? null,
         record.recordedAt,
         isVerified,
@@ -629,6 +902,8 @@ export class OpenGamingIndexer {
         attestationCid,
         isRevoked,
         revocationReason,
+        isLabelInvalidated,
+        activeLabelVals.length > 0 ? JSON.stringify(activeLabelVals) : null,
         JSON.stringify(record),
         now,
         isDemo ? 1 : 0
@@ -644,13 +919,27 @@ export class OpenGamingIndexer {
   }
 
   /**
-   * Re-evaluate all stored unlocks & scores issued by `publisherDid` whenever a revocation
-   * is added, updated, or deleted (`unrevoke`).
+   * Re-evaluate stored unlocks & scores whenever a revocation is added, updated, or deleted.
    */
-  async revalidatePublisherRecords(publisherDid: string): Promise<void> {
+  async revalidatePublisherRecords(publisherDid: string, subjectOwnerDid?: string): Promise<void> {
+    const dids = [...new Set([publisherDid, ...(subjectOwnerDid ? [subjectOwnerDid] : [])])];
+    const placeholders = dids.map(() => '?').join(', ');
+    const likePatterns = dids.map((d) => `at://${d}/%`);
+    const likeClause = likePatterns.map(() => 'achievement_uri LIKE ?').join(' OR ');
+
     const unlocks = this.db
-      .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM achievement_unlocks WHERE issuer_did = ?')
-      .all(publisherDid) as Array<{ uri: string; player_did: string; rkey: string; raw_json: string; is_demo: number }>;
+      .prepare(
+        `SELECT uri, player_did, rkey, raw_json, is_demo
+         FROM achievement_unlocks
+         WHERE issuer_did IN (${placeholders}) OR ${likeClause}`
+      )
+      .all(...dids, ...likePatterns) as Array<{
+      uri: string;
+      player_did: string;
+      rkey: string;
+      raw_json: string;
+      is_demo: number;
+    }>;
 
     const now = new Date().toISOString();
     for (const u of unlocks) {
@@ -664,9 +953,20 @@ export class OpenGamingIndexer {
       });
     }
 
+    const lbLikeClause = likePatterns.map(() => 'leaderboard_uri LIKE ?').join(' OR ');
     const scores = this.db
-      .prepare('SELECT uri, player_did, rkey, raw_json, is_demo FROM leaderboard_scores WHERE issuer_did = ?')
-      .all(publisherDid) as Array<{ uri: string; player_did: string; rkey: string; raw_json: string; is_demo: number }>;
+      .prepare(
+        `SELECT uri, player_did, rkey, raw_json, is_demo
+         FROM leaderboard_scores
+         WHERE issuer_did IN (${placeholders}) OR ${lbLikeClause}`
+      )
+      .all(...dids, ...likePatterns) as Array<{
+      uri: string;
+      player_did: string;
+      rkey: string;
+      raw_json: string;
+      is_demo: number;
+    }>;
 
     for (const s of scores) {
       await this.indexScoreRecord({
@@ -708,10 +1008,15 @@ export class OpenGamingIndexer {
       case NSIDS.LeaderboardScore:
         this.db.prepare('DELETE FROM leaderboard_scores WHERE uri = ?').run(uri);
         return true;
-      case NSIDS.Revocation:
+      case NSIDS.Revocation: {
+        const prev = this.db
+          .prepare('SELECT subject_uri FROM revocations WHERE uri = ?')
+          .get(uri) as { subject_uri?: string } | undefined;
+        const subjectOwner = prev?.subject_uri ? parseAtUri(prev.subject_uri)?.did : undefined;
         this.db.prepare('DELETE FROM revocations WHERE uri = ?').run(uri);
-        await this.revalidatePublisherRecords(did);
+        await this.revalidatePublisherRecords(did, subjectOwner);
         return true;
+      }
       default:
         return false;
     }

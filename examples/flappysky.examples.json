@@ -1,5 +1,5 @@
 {
-  "$comment": "End-to-end Open Gaming example records grounded in Flappysky (https://flappysky.symmetricalboy.com)",
+  "$comment": "End-to-end Open Gaming example records grounded in Flappysky (https://flappysky.symmetricalboy.com) plus multi-component, redacted-stub, and replay-verifiable examples",
   "gameDefinition_onGamePds": {
     "uri": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
     "value": {
@@ -98,6 +98,21 @@
         "listOrder": 90,
         "createdAt": "2026-11-07T20:00:00.000Z"
       }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/secret-ending-stub",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "hidden": true,
+        "hiddenSpace": "https://spaces.opengaming.games/flappysky/achievements/secret-ending-stub",
+        "tier": "platinum",
+        "listOrder": 100,
+        "trustedIssuers": [
+          "did:plc:communityrevivalhost000"
+        ],
+        "createdAt": "2026-11-08T05:00:00.000Z"
+      }
     }
   ],
   "achievementUnlock_onPlayerPds": {
@@ -115,6 +130,7 @@
           "key": "did:plc:flappyskygameexample#attestations",
           "issuer": "did:plc:flappyskygameexample",
           "issuedAt": "2026-11-07T21:15:00.120Z",
+          "rkey": "flappysky-first-flight",
           "cid": "bafyreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori",
           "signature": {
             "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
@@ -123,60 +139,175 @@
       ]
     }
   },
-  "leaderboardDefinition_onGamePds": {
-    "uri": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+  "achievementProgress_onPlayerPds": {
+    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.progress/flappysky-banger-collector",
     "value": {
-      "$type": "games.opengaming.leaderboard.definition",
+      "$type": "games.opengaming.achievement.progress",
+      "achievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/banger-collector",
+      "definitionCid": "bafyreig7dkulj7gxbtieaphkqdhyyok4egzjqljfxm7z34qoelajngbwqm",
       "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
-      "name": "High Scores",
-      "description": "Combined points from cleared posts and collected heart likes in a single run.",
-      "icon": {
-        "$type": "blob",
-        "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
-        "mimeType": "image/png",
-        "size": 50112
-      },
-      "iconAlt": "A golden arcade crown above blue clouds.",
-      "sortOrder": "largerIsBetter",
-      "scoreFormat": {
-        "kind": "numeric",
-        "decimalPlaces": 0,
-        "unitSingular": "pt",
-        "unitPlural": "pts"
-      },
-      "timeframes": ["daily", "weekly", "allTime"],
-      "recordPolicy": "perWindowBest",
-      "scoreMin": 1,
-      "scoreMax": 9999,
-      "listOrder": 1,
-      "createdAt": "2026-11-07T20:00:00.000Z"
+      "currentSteps": 64,
+      "stepsNeeded": 100,
+      "updatedAt": "2026-11-08T05:10:00.000Z"
     }
   },
-  "leaderboardScore_onPlayerPds": {
-    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.leaderboard.score/3mzrk9abcde2v",
-    "value": {
-      "$type": "games.opengaming.leaderboard.score",
-      "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
-      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
-      "player": "did:plc:33d7gnwiagm6cimpiepefp72",
-      "score": 42,
-      "displayScore": "42 pts",
-      "tag": "posts:30,likes:12",
-      "recordedAt": "2026-11-07T21:18:30.000Z",
-      "signatures": [
-        {
-          "$type": "games.opengaming.defs#inlineSignature",
-          "key": "did:plc:flappyskygameexample#attestations",
-          "issuer": "did:plc:flappyskygameexample",
-          "issuedAt": "2026-11-07T21:18:30.200Z",
-          "cid": "bafyreig7dkulj7gxbtieaphkqdhyyok4egzjqljfxm7z34qoelajngbwqm",
-          "signature": {
-            "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+  "leaderboardDefinition_onGamePds": [
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+      "value": {
+        "$type": "games.opengaming.leaderboard.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "name": "High Scores",
+        "description": "Combined points from cleared posts and collected heart likes in a single run.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
+          "mimeType": "image/png",
+          "size": 50112
+        },
+        "iconAlt": "A golden arcade crown above blue clouds.",
+        "sortOrder": "largerIsBetter",
+        "scoreFormat": {
+          "kind": "numeric",
+          "decimalPlaces": 0,
+          "unitSingular": "pt",
+          "unitPlural": "pts"
+        },
+        "timeframes": ["daily", "weekly", "allTime"],
+        "recordPolicy": "perWindowBest",
+        "scoreMin": 1,
+        "scoreMax": 9999,
+        "listOrder": 1,
+        "createdAt": "2026-11-07T20:00:00.000Z"
+      }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/rhythm-stage-1",
+      "value": {
+        "$type": "games.opengaming.leaderboard.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "name": "Blue Sky Theme [EXPERT 11+]",
+        "description": "Multi-component rhythm & speedrun stage showcasing forward-compatible component maps, legal chart version hashes, and multi-issuer EoS federation.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
+          "mimeType": "image/png",
+          "size": 50112
+        },
+        "components": {
+          "ex-score": {
+            "$type": "games.opengaming.defs#pointsComponentDef",
+            "name": "EX Score",
+            "minimum": 0,
+            "maximum": 1000000,
+            "unitPlural": "EX"
+          },
+          "accuracy": {
+            "$type": "games.opengaming.defs#percentageComponentDef",
+            "name": "Accuracy",
+            "precision": 2,
+            "minimum": 0,
+            "maximum": 10100
+          },
+          "lamp": {
+            "$type": "games.opengaming.defs#enumComponentDef",
+            "name": "Clear Lamp",
+            "values": [
+              { "id": "all-perfect", "name": "ALL PERFECT" },
+              { "id": "full-combo", "name": "FULL COMBO" },
+              { "id": "clear", "name": "CLEAR" },
+              { "id": "failed", "name": "FAILED" }
+            ]
+          },
+          "clear-time": {
+            "$type": "games.opengaming.defs#timeComponentDef",
+            "name": "Clear Time",
+            "timeUnit": "milliseconds"
           }
-        }
-      ]
+        },
+        "componentOrder": ["ex-score", "accuracy", "lamp", "clear-time"],
+        "defaultComponent": "ex-score",
+        "detailsSchema": "games.opengaming.defs#judgmentBreakdown",
+        "rankedVersions": [
+          "md5:9e107d9d372bb6826bd81d3542a419d6"
+        ],
+        "trustedIssuers": [
+          "did:plc:communityrevivalhost000"
+        ],
+        "timeframes": ["allTime", "weekly"],
+        "recordPolicy": "perWindowBest",
+        "listOrder": 2,
+        "createdAt": "2026-11-08T05:00:00.000Z"
+      }
     }
-  },
+  ],
+  "leaderboardScore_onPlayerPds": [
+    {
+      "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.leaderboard.score/3mzrk9abcde2v",
+      "value": {
+        "$type": "games.opengaming.leaderboard.score",
+        "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "score": 42,
+        "displayScore": "42 pts",
+        "tag": "posts:30,likes:12",
+        "recordedAt": "2026-11-07T21:18:30.000Z",
+        "signatures": [
+          {
+            "$type": "games.opengaming.defs#inlineSignature",
+            "key": "did:plc:flappyskygameexample#attestations",
+            "issuer": "did:plc:flappyskygameexample",
+            "issuedAt": "2026-11-07T21:18:30.200Z",
+            "cid": "bafyreig7dkulj7gxbtieaphkqdhyyok4egzjqljfxm7z34qoelajngbwqm",
+            "signature": {
+              "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+            }
+          }
+        ]
+      }
+    },
+    {
+      "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.leaderboard.score/3mzrmulti001",
+      "value": {
+        "$type": "games.opengaming.leaderboard.score",
+        "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/rhythm-stage-1",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "score": 994210,
+        "displayScore": "994,210 EX · 99.42% · FULL COMBO",
+        "components": {
+          "ex-score": { "$type": "games.opengaming.defs#pointsComponentVal", "value": 994210 },
+          "accuracy": { "$type": "games.opengaming.defs#percentageComponentVal", "value": 9942 },
+          "lamp": { "$type": "games.opengaming.defs#enumComponentVal", "value": "full-combo" },
+          "clear-time": { "$type": "games.opengaming.defs#timeComponentVal", "value": 118420 }
+        },
+        "details": {
+          "$type": "games.opengaming.defs#judgmentBreakdown",
+          "judgments": {
+            "marvelous": { "total": 812, "early": 14, "late": 11 },
+            "perfect": { "total": 45, "early": 19, "late": 26 },
+            "great": { "total": 2, "early": 2, "late": 0 },
+            "miss": { "total": 0 }
+          },
+          "judgmentOrder": ["marvelous", "perfect", "great", "miss"],
+          "maxCombo": 859,
+          "totalEarly": 35,
+          "totalLate": 37,
+          "mode": "singles",
+          "inputMethod": "keyboard"
+        },
+        "version": "md5:9e107d9d372bb6826bd81d3542a419d6",
+        "replay": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
+          "mimeType": "application/octet-stream",
+          "size": 6144
+        },
+        "recordedAt": "2026-11-08T05:12:00.000Z"
+      }
+    }
+  ],
   "revocation_onGamePds": {
     "uri": "at://did:plc:flappyskygameexample/games.opengaming.revocation/bafyreibym4dl6h3luuk5mdlkhznlrzqqc57vdcqwfbe4swkddtmfgxwb34",
     "value": {

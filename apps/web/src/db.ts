@@ -4,6 +4,13 @@ import { DatabaseSync } from 'node:sqlite';
 
 export type AppDatabase = DatabaseSync;
 
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+}
+
 export function createDatabase(dbPath = ':memory:'): AppDatabase {
   if (dbPath !== ':memory:') {
     const resolved = path.resolve(dbPath);
@@ -79,6 +86,9 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       locked_icon_mime TEXT,
       tier TEXT,
       hidden INTEGER NOT NULL DEFAULT 0,
+      hidden_space TEXT,
+      is_redacted_stub INTEGER NOT NULL DEFAULT 0,
+      trusted_issuers_json TEXT,
       steps_needed INTEGER,
       group_name TEXT,
       list_order INTEGER,
@@ -104,6 +114,11 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       icon_alt TEXT,
       sort_order TEXT NOT NULL,
       score_format_json TEXT NOT NULL,
+      components_json TEXT,
+      default_component TEXT,
+      details_schema TEXT,
+      ranked_versions_json TEXT,
+      trusted_issuers_json TEXT,
       timeframes_json TEXT NOT NULL,
       record_policy TEXT NOT NULL,
       score_min INTEGER,
@@ -132,6 +147,8 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       attestation_cid TEXT,
       revoked INTEGER NOT NULL DEFAULT 0,
       revocation_reason TEXT,
+      label_invalidated INTEGER NOT NULL DEFAULT 0,
+      active_labels_json TEXT,
       raw_json TEXT NOT NULL,
       indexed_at TEXT NOT NULL,
       is_demo INTEGER NOT NULL DEFAULT 0
@@ -146,6 +163,7 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       player_did TEXT NOT NULL,
       rkey TEXT NOT NULL,
       achievement_uri TEXT NOT NULL,
+      definition_cid TEXT,
       game_uri TEXT,
       current_steps INTEGER NOT NULL,
       steps_needed INTEGER,
@@ -167,6 +185,11 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       game_uri TEXT,
       score INTEGER NOT NULL,
       display_score TEXT,
+      components_json TEXT,
+      details_json TEXT,
+      version TEXT,
+      replay_cid TEXT,
+      replay_mime TEXT,
       tag TEXT,
       recorded_at TEXT NOT NULL,
       verified INTEGER NOT NULL DEFAULT 0,
@@ -177,6 +200,8 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       attestation_cid TEXT,
       revoked INTEGER NOT NULL DEFAULT 0,
       revocation_reason TEXT,
+      label_invalidated INTEGER NOT NULL DEFAULT 0,
+      active_labels_json TEXT,
       raw_json TEXT NOT NULL,
       indexed_at TEXT NOT NULL,
       is_demo INTEGER NOT NULL DEFAULT 0
@@ -205,7 +230,46 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
     );
     CREATE INDEX IF NOT EXISTS idx_revocations_publisher ON revocations(publisher_did);
     CREATE INDEX IF NOT EXISTS idx_revocations_cid ON revocations(attestation_cid);
+
+    CREATE TABLE IF NOT EXISTS moderation_labels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      src TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      cid TEXT NOT NULL DEFAULT '',
+      val TEXT NOT NULL,
+      neg INTEGER NOT NULL DEFAULT 0,
+      cts TEXT NOT NULL,
+      exp TEXT,
+      indexed_at TEXT NOT NULL,
+      UNIQUE(src, uri, cid, val)
+    );
+    CREATE INDEX IF NOT EXISTS idx_labels_uri ON moderation_labels(uri);
+    CREATE INDEX IF NOT EXISTS idx_labels_src ON moderation_labels(src);
   `);
+
+  // Idempotent schema migrations for pre-existing persistent SQLite databases
+  ensureColumn(db, 'achievement_definitions', 'hidden_space', 'TEXT');
+  ensureColumn(db, 'achievement_definitions', 'is_redacted_stub', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'achievement_definitions', 'trusted_issuers_json', 'TEXT');
+
+  ensureColumn(db, 'leaderboard_definitions', 'components_json', 'TEXT');
+  ensureColumn(db, 'leaderboard_definitions', 'default_component', 'TEXT');
+  ensureColumn(db, 'leaderboard_definitions', 'details_schema', 'TEXT');
+  ensureColumn(db, 'leaderboard_definitions', 'ranked_versions_json', 'TEXT');
+  ensureColumn(db, 'leaderboard_definitions', 'trusted_issuers_json', 'TEXT');
+
+  ensureColumn(db, 'achievement_unlocks', 'label_invalidated', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'achievement_unlocks', 'active_labels_json', 'TEXT');
+
+  ensureColumn(db, 'achievement_progress', 'definition_cid', 'TEXT');
+
+  ensureColumn(db, 'leaderboard_scores', 'components_json', 'TEXT');
+  ensureColumn(db, 'leaderboard_scores', 'details_json', 'TEXT');
+  ensureColumn(db, 'leaderboard_scores', 'version', 'TEXT');
+  ensureColumn(db, 'leaderboard_scores', 'replay_cid', 'TEXT');
+  ensureColumn(db, 'leaderboard_scores', 'replay_mime', 'TEXT');
+  ensureColumn(db, 'leaderboard_scores', 'label_invalidated', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'leaderboard_scores', 'active_labels_json', 'TEXT');
 
   // Purge any legacy dummy/showcase rows (`is_demo = 1`) from persistent SQLite databases
   db.exec(`

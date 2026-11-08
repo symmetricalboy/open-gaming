@@ -190,6 +190,8 @@ export async function createAppViewServer(options?: {
         const timeframe = (url.searchParams.get('timeframe') ?? 'allTime') as Timeframe;
         const scope = (url.searchParams.get('scope') ?? 'public') as 'public' | 'social';
         const viewer = url.searchParams.get('viewer')?.trim() || undefined;
+        const sortBy = url.searchParams.get('sortBy')?.trim() || undefined;
+        const version = url.searchParams.get('version')?.trim() || undefined;
         const verifiedOnlyParam = url.searchParams.get('verifiedOnly');
         const verifiedOnly = verifiedOnlyParam === null ? true : verifiedOnlyParam !== 'false';
         const limit = Number.parseInt(url.searchParams.get('limit') ?? '25', 10) || 25;
@@ -200,6 +202,8 @@ export async function createAppViewServer(options?: {
           timeframe,
           scope,
           viewer,
+          sortBy,
+          version,
           verifiedOnly,
           limit,
           cursor,
@@ -244,6 +248,8 @@ export async function createAppViewServer(options?: {
         const timeframe = (url.searchParams.get('timeframe') ?? 'allTime') as Timeframe;
         const scope = (url.searchParams.get('scope') ?? 'public') as 'public' | 'social';
         const viewer = url.searchParams.get('viewer')?.trim() || undefined;
+        const sortBy = url.searchParams.get('sortBy')?.trim() || undefined;
+        const version = url.searchParams.get('version')?.trim() || undefined;
         const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50;
 
         sendJson(
@@ -254,6 +260,8 @@ export async function createAppViewServer(options?: {
             timeframe,
             scope,
             viewer,
+            sortBy,
+            version,
             limit,
           })
         );

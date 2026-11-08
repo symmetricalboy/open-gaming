@@ -16,6 +16,11 @@
             "format": "at-uri",
             "description": "AT-URI of the incremental `games.opengaming.achievement.definition` record."
           },
+          "definitionCid": {
+            "type": "string",
+            "format": "cid",
+            "description": "Optional CID snapshot of the `achievement.definition` record when progress was synced, matching `achievement.unlock` and `leaderboard.score`."
+          },
           "game": {
             "type": "string",
             "format": "at-uri",
@@ -39,7 +44,7 @@
           "signatures": {
             "type": "array",
             "maxLength": 8,
-            "description": "Optional inline publisher attestation (`games.opengaming.defs#inlineSignature`) over current progress.",
+            "description": "Optional inline publisher or host attestation (`games.opengaming.defs#inlineSignature`) over current progress.",
             "items": {
               "type": "union",
               "refs": [

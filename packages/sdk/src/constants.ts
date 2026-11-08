@@ -14,3 +14,16 @@ export const NSIDS = {
 } as const;
 
 export const ATTESTATION_KEY_FRAGMENT = '#attestations' as const;
+
+export const DEFAULT_INVALIDATING_LABELS = [
+  '!cheat',
+  'cheating',
+  'exploit',
+  'invalid-replay',
+  'revoked',
+] as const;
+
+export const DEFAULT_VERIFICATION_LABELS = [
+  'verified-replay',
+  'community-verified',
+] as const;

@@ -1,11 +1,11 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.leaderboard.getScores",
-  "description": "Query ranked leaderboard entries by timeframe (daily, weekly, all-time) and scope (public vs social follows).",
+  "description": "Query ranked leaderboard entries by timeframe, scope, component column, and legal chart/build version.",
   "defs": {
     "main": {
       "type": "query",
-      "description": "Returns ranked entries for a `games.opengaming.leaderboard.definition`, filtered by timeframe, cryptographic verification, publisher `games.opengaming.revocation` records, and social graph.",
+      "description": "Returns ranked entries for a `games.opengaming.leaderboard.definition`, filtered by timeframe, `rankedVersions`, cryptographic verification (or post-EoS open mode), publisher `games.opengaming.revocation` records, ATProto moderation labels, and social graph.",
       "parameters": {
         "type": "params",
         "required": ["leaderboard"],
@@ -32,10 +32,21 @@
             "format": "did",
             "description": "Optional viewer DID used to compute `social` scope and return `viewerEntry`."
           },
+          "sortBy": {
+            "type": "string",
+            "format": "record-key",
+            "maxLength": 32,
+            "description": "Optional component key from `leaderboard.definition#components` to sort rankings by (defaults to `defaultComponent` or headline `score`)."
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional chart/build version hash filter. When omitted and `leaderboard.definition#rankedVersions` is non-empty, only scores matching `rankedVersions` are returned."
+          },
           "verifiedOnly": {
             "type": "boolean",
             "default": true,
-            "description": "When true, excludes unsigned, invalidly signed, or publisher-revoked (`games.opengaming.revocation`) score records."
+            "description": "When true, excludes unverified scores, publisher-revoked (`games.opengaming.revocation`) records, and records carrying invalidating ATProto moderation labels."
           },
           "limit": {
             "type": "integer",
@@ -57,6 +68,11 @@
             "leaderboard": {
               "type": "string",
               "format": "at-uri"
+            },
+            "sortedBy": {
+              "type": "string",
+              "maxLength": 32,
+              "description": "Component key used to rank entries when the leaderboard defines `components`."
             },
             "entries": {
               "type": "array",
@@ -103,14 +119,43 @@
           "format": "cid",
           "description": "Computed repository-bound attestation CIDv1 of the score record."
         },
+        "issuer": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the publisher, host, or revival server whose attestation verified this entry."
+        },
         "score": {
           "type": "integer"
         },
         "displayScore": {
           "type": "string"
         },
+        "components": {
+          "type": "ref",
+          "ref": "games.opengaming.defs#scoreComponentValMap"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "hasReplay": {
+          "type": "boolean"
+        },
+        "replayCid": {
+          "type": "string",
+          "format": "cid"
+        },
         "tag": {
           "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "maxLength": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Active ATProto moderation or replay-verification label values attached to this record."
         },
         "recordedAt": {
           "type": "string",
@@ -118,11 +163,11 @@
         },
         "verified": {
           "type": "boolean",
-          "description": "True if inline signature verification against the publisher's `#attestations` DID key succeeded AND no matching `games.opengaming.revocation` exists."
+          "description": "True if verified by a trusted `#attestations` DID key (or community `verified-replay` label) AND neither publisher-revoked nor invalidated by moderation labels."
         },
         "revoked": {
           "type": "boolean",
-          "description": "True if revoked by a `games.opengaming.revocation` record in the publisher's repository (only returned when `verifiedOnly` is false)."
+          "description": "True if invalidated by a publisher `games.opengaming.revocation` record or trusted anti-cheat moderation label (only returned when `verifiedOnly` is false)."
         }
       }
     }

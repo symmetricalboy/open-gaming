@@ -28,6 +28,10 @@ function esc(value) {
     .replaceAll("'", '&#39;');
 }
 
+function escCssString(value) {
+  return String(value ?? '').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+}
+
 function formatTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -159,16 +163,40 @@ syncForm?.addEventListener('submit', async (e) => {
 
 /* --- Cryptographic Proof Inspector Modal --- */
 async function openProofInspector(recordUri) {
-  proofDialogBody.innerHTML = '<p class="muted-text">Loading cryptographic attestation &amp; revocation state…</p>';
+  proofDialogBody.innerHTML = '<p class="muted-text">Loading cryptographic attestation, labels &amp; revocation state…</p>';
   proofDialog.showModal();
 
   try {
     const data = await fetchJson(`/api/proof?uri=${encodeURIComponent(recordUri)}`);
-    const statusBadge = data.revoked
-      ? '<span class="proof-chip revoked">Revoked on Game PDS</span>'
-      : data.verified
-        ? '<span class="proof-chip verified">Verified Inline Signature</span>'
-        : `<span class="proof-chip revoked">Rejected (${esc(data.verificationError || 'unverified')})</span>`;
+    const isLabelVerified = Boolean(data.verified && String(data.keyId || '').startsWith('label:'));
+    const statusBadge = data.labelInvalidated
+      ? '<span class="proof-chip revoked">Invalidated by Anti-Cheat Label</span>'
+      : data.revoked
+        ? '<span class="proof-chip revoked">Revoked on Game PDS</span>'
+        : isLabelVerified
+          ? '<span class="proof-chip verified">Verified via Community Replay Label</span>'
+          : data.verified
+            ? '<span class="proof-chip verified">Verified Inline Signature</span>'
+            : `<span class="proof-chip revoked">Rejected (${esc(data.verificationError || 'unverified')})</span>`;
+
+    const rkeyBound = data.record?.signatures?.[0]?.rkey;
+
+    const labelsSection =
+      Array.isArray(data.activeLabels) && data.activeLabels.length > 0
+        ? `
+          <h3>Active ATProto Labels (<code>com.atproto.label.defs#label</code>)</h3>
+          <dl class="kv-dl">
+            ${data.activeLabels
+              .map(
+                (l) => `
+                  <dt><code>${esc(l.val)}</code></dt>
+                  <dd>Issued by <code>${esc(l.src)}</code> &middot; ${formatTime(l.cts)}</dd>
+                `
+              )
+              .join('')}
+          </dl>
+        `
+        : '';
 
     const revocationSection = data.revocation
       ? `
@@ -185,9 +213,10 @@ async function openProofInspector(recordUri) {
       : '';
 
     proofDialogBody.innerHTML = `
-      <div class="pill-row" style="margin-block-end: 0.85rem;">
+      <div class="pill-row mb-sm">
         ${statusBadge}
         <span class="badge">${esc(data.kind)}</span>
+        ${data.version ? `<span class="badge badge-accent">Version: ${esc(data.version)}</span>` : ''}
       </div>
       ${data.verificationMessage ? `<p class="muted-text">${esc(data.verificationMessage)}</p>` : ''}
       <dl class="kv-dl">
@@ -195,11 +224,15 @@ async function openProofInspector(recordUri) {
         <dd><code>${esc(data.uri)}</code></dd>
         <dt>Player Repo DID</dt>
         <dd><code>${esc(data.playerDid)}</code></dd>
-        <dt>Publisher Key</dt>
+        ${data.issuerDid ? `<dt>Signing / Verifying Issuer</dt><dd><code>${esc(data.issuerDid)}</code></dd>` : ''}
+        <dt>Verification Key / Source</dt>
         <dd><code>${esc(data.keyId || 'None (Unsigned)')}</code></dd>
         <dt>Attestation CID</dt>
         <dd><code>${esc(data.attestationCid || 'N/A')}</code></dd>
+        ${rkeyBound ? `<dt>Bound Record Key ($sig.rkey)</dt><dd><code>${esc(rkeyBound)}</code></dd>` : ''}
+        ${data.replayCid ? `<dt>Replay Blob CID</dt><dd><code>${esc(data.replayCid)}</code></dd>` : ''}
       </dl>
+      ${labelsSection}
       ${revocationSection}
       <h3>Raw Player PDS Record JSON</h3>
       <pre tabindex="0"><code>${esc(JSON.stringify(data.record, null, 2))}</code></pre>
@@ -458,7 +491,9 @@ async function renderGameDetail(searchParams) {
       const showMasked = a.masked && !revealSpoilers;
       const displayTitle = showMasked ? 'Hidden Achievement' : a.revealedTitle;
       const displayDesc = showMasked
-        ? 'Unlock this achievement in-game (or click Reveal Spoilers) to view details.'
+        ? a.hiddenSpace
+          ? 'Spoiler-proof hidden stub — unlock in-game to receive access to the ATProto Space holding the real metadata.'
+          : 'Unlock this achievement in-game (or click Reveal Spoilers) to view details.'
         : unlocked
           ? a.revealedDescription
           : a.requirement || a.revealedDescription;
@@ -481,17 +516,19 @@ async function renderGameDetail(searchParams) {
         <li class="card ach-card ${unlocked || !viewer ? '' : 'locked'}">
           <div class="card-row">
             <img src="${esc(iconSrc)}" alt="${esc(a.iconAlt)}" width="56" height="56" class="ach-icon" loading="lazy">
-            <div style="flex: 1;">
+            <div class="flex-1">
               <div class="pill-row">
                 <h3>${esc(displayTitle)}</h3>
                 ${renderTierBadge(a.tier)}
                 ${a.hidden ? '<span class="badge">Hidden</span>' : ''}
+                ${a.isRedactedStub || a.hiddenSpace ? '<span class="badge badge-accent">Space-Gated Stub</span>' : ''}
               </div>
               <p class="muted-text">${esc(displayDesc)}</p>
+              ${a.hiddenSpace ? `<div class="muted-text">Space: <code>${esc(a.hiddenSpace)}</code></div>` : ''}
             </div>
           </div>
           ${progressBlock}
-          <div class="pill-row" style="justify-content: space-between; margin-block-start: auto;">
+          <div class="pill-row card-footer-row">
             <span class="muted-text">${esc(a.rarityPercent)}% of players unlocked (${Number(a.unlockedPlayersCount)}/${Number(data.game.totalPlayers)})</span>
             ${
               a.viewerUnlock
@@ -603,6 +640,8 @@ async function renderLeaderboards(searchParams) {
   const timeframe = searchParams.get('timeframe') || 'allTime';
   const scope = searchParams.get('scope') || 'public';
   const viewer = searchParams.get('viewer') || (scope === 'social' ? 'symmetricalboy.com' : '');
+  const sortBy = searchParams.get('sortBy') || '';
+  const version = searchParams.get('version') || '';
 
   const queryParams = new URLSearchParams({
     leaderboard: selectedUri,
@@ -610,6 +649,8 @@ async function renderLeaderboards(searchParams) {
     scope,
   });
   if (viewer) queryParams.set('viewer', viewer);
+  if (sortBy) queryParams.set('sortBy', sortBy);
+  if (version) queryParams.set('version', version);
 
   const board = await fetchJson(`/api/leaderboard?${queryParams.toString()}`);
   document.title = `${board.definition.name} Leaderboard | opengaming.games`;
@@ -641,10 +682,113 @@ async function renderLeaderboards(searchParams) {
   socialParams.set('scope', 'social');
   if (!socialParams.get('viewer')) socialParams.set('viewer', 'symmetricalboy.com');
 
+  const compMap =
+    board.definition.components &&
+    typeof board.definition.components === 'object' &&
+    !Array.isArray(board.definition.components)
+      ? board.definition.components
+      : {};
+  const orderedCompIds =
+    Array.isArray(board.definition.componentOrder) && board.definition.componentOrder.length > 0
+      ? board.definition.componentOrder.filter((id) => compMap[id])
+      : Object.keys(compMap);
+  const compDefs = orderedCompIds.map((id) => ({ id, ...compMap[id] }));
+  const hasComponents = compDefs.length > 0;
+  const sortableComps = compDefs.filter((c) => c.$type !== 'games.opengaming.defs#textComponentDef');
+  const activeSortId = board.sortedBy || board.definition.defaultComponent || sortableComps[0]?.id || '';
+
+  const componentSortBar =
+    sortableComps.length > 1
+      ? `
+        <div class="pill-row">
+          <span class="muted-text">Rank by Component:</span>
+          <div class="segmented" role="group" aria-label="Sort by score component">
+            ${sortableComps
+              .map((c) => {
+                const next = new URLSearchParams(queryParams);
+                next.set('sortBy', c.id);
+                const isSorted = c.id === activeSortId;
+                return `<button type="button" data-nav="/leaderboards?${esc(next.toString())}" aria-pressed="${isSorted}">${esc(c.name)}</button>`;
+              })
+              .join('')}
+          </div>
+        </div>
+      `
+      : '';
+
+  const rankedVersions = Array.isArray(board.definition.rankedVersions) ? board.definition.rankedVersions : [];
+  const versionFilterBar =
+    rankedVersions.length > 0
+      ? `
+        <div class="pill-row mb-sm">
+          <span class="muted-text">Legal Chart / Build Hashes (<code>rankedVersions</code>):</span>
+          ${(() => {
+            const allParams = new URLSearchParams(queryParams);
+            allParams.delete('version');
+            const buttons = [
+              `<button type="button" class="btn ${!version ? 'btn-primary' : 'btn-subtle'}" data-nav="/leaderboards?${esc(allParams.toString())}" aria-pressed="${!version}">All Legal (${rankedVersions.length})</button>`,
+              ...rankedVersions.map((v) => {
+                const vp = new URLSearchParams(queryParams);
+                vp.set('version', v);
+                const isSelected = version === v;
+                const shortV = v.length > 22 ? `${v.slice(0, 18)}…` : v;
+                return `<button type="button" class="btn ${isSelected ? 'btn-primary' : 'btn-subtle'}" data-nav="/leaderboards?${esc(vp.toString())}" aria-pressed="${isSelected}"><code>${esc(shortV)}</code></button>`;
+              }),
+            ];
+            return buttons.join('');
+          })()}
+        </div>
+      `
+      : '';
+
+  const scoreHeaders = hasComponents
+    ? compDefs.map((c) => ({ id: c.id, label: c.name, active: c.id === activeSortId }))
+    : [{ id: 'score', label: 'Score', active: false }];
+
+  const colLabelsForMobile = [
+    'Player',
+    ...scoreHeaders.map((h) => h.label),
+    'Run Tag',
+    'Recorded',
+    'Attestation',
+  ];
+  const tableCustomProps = colLabelsForMobile
+    .map((lbl, idx) => `--label-${idx + 2}: "${escCssString(lbl)}"`)
+    .join('; ');
+
+  const totalDataCols = colLabelsForMobile.length;
+
   const rowsHtml = board.entries.length
     ? board.entries
         .map((e) => {
           const isViewer = board.viewerEntry && e.player === board.viewerEntry.player;
+          const scoreCellsHtml = hasComponents
+            ? (e.formattedComponents || [])
+                .map(
+                  (fc) =>
+                    `<td class="${fc.id === activeSortId ? 'active-sort-col' : ''}"><span class="score-mono">${esc(fc.displayValue)}</span></td>`
+                )
+                .join('')
+            : `<td><span class="score-mono">${esc(e.displayScore)}</span></td>`;
+
+          const metaChips = [
+            e.tag ? `<code>${esc(e.tag)}</code>` : '',
+            e.version ? `<span class="badge">${esc(e.version.length > 18 ? `${e.version.slice(0, 15)}…` : e.version)}</span>` : '',
+            e.hasReplay && e.replayDownloadUrl
+              ? `<a href="${esc(e.replayDownloadUrl)}" target="_blank" rel="noopener" class="badge badge-accent">Replay &darr;</a>`
+              : e.hasReplay
+                ? '<span class="badge badge-accent">Replay</span>'
+                : '',
+            ...(Array.isArray(e.labels) ? e.labels.map((lbl) => `<span class="badge badge-accent">${esc(lbl)}</span>`) : []),
+          ]
+            .filter(Boolean)
+            .join(' ');
+
+          const proofLabel =
+            e.verificationMethod === 'community-label'
+              ? 'Community Verified'
+              : `Verified &middot; ${esc(shortCid(e.attestationCid))}`;
+
           return `
             <tr class="${isViewer ? 'viewer-highlight' : ''}">
               <th scope="row">#${Number(e.rank)}</th>
@@ -654,19 +798,19 @@ async function renderLeaderboards(searchParams) {
                 </a>
                 <div class="muted-text"><code>${esc(e.player)}</code></div>
               </td>
-              <td><span class="score-mono">${esc(e.displayScore)}</span></td>
-              <td>${e.tag ? `<code>${esc(e.tag)}</code>` : '<span class="muted-text">—</span>'}</td>
+              ${scoreCellsHtml}
+              <td>${metaChips ? `<div class="pill-row">${metaChips}</div>` : '<span class="muted-text">—</span>'}</td>
               <td>${formatTime(e.recordedAt)}</td>
               <td>
                 <button type="button" class="proof-chip verified" data-proof-uri="${esc(e.uri)}" aria-label="Inspect cryptographic signature for rank ${Number(e.rank)}">
-                  Verified &middot; ${esc(shortCid(e.attestationCid))}
+                  ${proofLabel}
                 </button>
               </td>
             </tr>
           `;
         })
         .join('')
-    : `<tr><th scope="row">—</th><td colspan="5" class="muted-text">No verified scores recorded inside this ${esc(timeframe)} window yet.</td></tr>`;
+    : `<tr><th scope="row">—</th><td colspan="${totalDataCols}" class="muted-text">No verified scores recorded inside this ${esc(timeframe)} window yet.</td></tr>`;
 
   return `
     <div class="section-header">
@@ -675,7 +819,8 @@ async function renderLeaderboards(searchParams) {
         <p class="muted-text">
           ${esc(board.definition.description || '')} &middot;
           Policy: <code>${esc(board.definition.recordPolicy)}</code> &middot;
-          Order: <code>${esc(board.definition.sortOrder)}</code>
+          ${hasComponents ? `Sorted by: <code>${esc(activeSortId)}</code>` : `Order: <code>${esc(board.definition.sortOrder)}</code>`}
+          ${board.definition.trustedIssuers?.length ? ` &middot; Federated Issuers: <strong>+${Number(board.definition.trustedIssuers.length)}</strong>` : ''}
         </p>
       </div>
       ${
@@ -700,12 +845,16 @@ async function renderLeaderboards(searchParams) {
         </div>
       </div>
 
-      <form id="lb-viewer-form" class="pill-row" data-lb-uri="${esc(selectedUri)}" data-timeframe="${esc(timeframe)}" data-scope="${esc(scope)}">
+      ${componentSortBar}
+
+      <form id="lb-viewer-form" class="pill-row" data-lb-uri="${esc(selectedUri)}" data-timeframe="${esc(timeframe)}" data-scope="${esc(scope)}" data-sort-by="${esc(sortBy)}" data-version="${esc(version)}">
         <label for="lb-viewer-input" class="muted-text">Social Viewer:</label>
         <input type="text" id="lb-viewer-input" name="viewer" value="${esc(viewer)}" placeholder="symmetricalboy.com">
         <button type="submit" class="btn btn-subtle">Apply</button>
       </form>
     </div>
+
+    ${versionFilterBar}
 
     <div class="xrpc-bar">
       <span>Live XRPC Query: <code>${esc(xrpcUrl)}</code></span>
@@ -714,7 +863,7 @@ async function renderLeaderboards(searchParams) {
 
     ${
       board.viewerEntry
-        ? `<p class="status-pill" style="margin-block-end: 0.85rem;">
+        ? `<p class="status-pill mb-sm">
              Viewer Standing (@${esc(board.viewerEntry.handle || board.viewerEntry.player)}):
              <strong>#${Number(board.viewerEntry.rank)}</strong> with <span class="score-mono">${esc(board.viewerEntry.displayScore)}</span>
            </p>`
@@ -722,7 +871,7 @@ async function renderLeaderboards(searchParams) {
     }
 
     <div tabindex="0" role="region" aria-labelledby="leaderboard-caption" class="table-wrapper">
-      <table>
+      <table style="${esc(tableCustomProps)}">
         <caption id="leaderboard-caption">
           ${esc(board.definition.name)} (${esc(tfLabels[timeframe] || timeframe)} &middot; ${scope === 'social' ? `Following of @${esc(viewer)}` : 'Global Verified Rankings'})
         </caption>
@@ -730,7 +879,12 @@ async function renderLeaderboards(searchParams) {
           <tr>
             <th scope="col">Rank</th>
             <th scope="col">Player</th>
-            <th scope="col">Score</th>
+            ${scoreHeaders
+              .map(
+                (h) =>
+                  `<th scope="col" class="${h.active ? 'active-sort-col' : ''}">${esc(h.label)}</th>`
+              )
+              .join('')}
             <th scope="col">Run Tag</th>
             <th scope="col">Recorded</th>
             <th scope="col">Attestation</th>
@@ -917,15 +1071,15 @@ async function renderAuditLedger() {
   const data = await fetchJson('/api/audit');
 
   const revBody = data.revocations.length
-    ? `<ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${data.revocations
+    ? `<ul class="cards-grid single-col-grid" role="list">${data.revocations
         .map(
           (r) => `
           <li class="card">
-            <div class="pill-row" style="justify-content: space-between;">
+            <div class="pill-row space-between">
               <span class="proof-chip revoked">Scope: ${esc(r.scope)} &middot; ${esc(r.reason)}</span>
               <span class="muted-text">${formatTime(r.revokedAt)}</span>
             </div>
-            <dl class="kv-dl" style="margin-block-end: 0;">
+            <dl class="kv-dl mb-0">
               <dt>Revocation URI</dt>
               <dd><code>${esc(r.uri)}</code></dd>
               <dt>Player</dt>
@@ -942,18 +1096,41 @@ async function renderAuditLedger() {
         .join('')}</ul>`
     : '<p class="card muted-text">No revocations published.</p>';
 
+  const labelsList = Array.isArray(data.moderationLabels) ? data.moderationLabels : [];
+  const labelsBody = labelsList.length
+    ? `<ul class="cards-grid single-col-grid" role="list">${labelsList
+        .map(
+          (l) => `
+          <li class="card">
+            <div class="pill-row space-between">
+              <span class="proof-chip ${l.neg ? 'verified' : 'revoked'}">${l.neg ? 'Negated Label' : 'Active Label'}: <code>${esc(l.val)}</code></span>
+              <span class="muted-text">${formatTime(l.cts)}</span>
+            </div>
+            <dl class="kv-dl mb-0">
+              <dt>Labeler DID</dt>
+              <dd><code>${esc(l.src)}</code></dd>
+              <dt>Target URI / DID</dt>
+              <dd><code>${esc(l.uri)}</code></dd>
+              ${l.cid ? `<dt>Target CID</dt><dd><code>${esc(l.cid)}</code></dd>` : ''}
+            </dl>
+          </li>
+        `
+        )
+        .join('')}</ul>`
+    : '<p class="card muted-text">No ATProto moderation or replay-verification labels ingested yet.</p>';
+
   const rejectedBody = data.rejectedRecords.length
-    ? `<ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${data.rejectedRecords
+    ? `<ul class="cards-grid single-col-grid" role="list">${data.rejectedRecords
         .map(
           (rec) => `
           <li class="card">
-            <div class="pill-row" style="justify-content: space-between;">
+            <div class="pill-row space-between">
               <span class="badge">${esc(rec.kind)}</span>
               <button type="button" class="proof-chip revoked" data-proof-uri="${esc(rec.uri)}">
                 ${rec.revoked ? `Revoked (${esc(rec.revocationReason || 'revoked')})` : `Rejected (${esc(rec.error)})`} &middot; Inspect
               </button>
             </div>
-            <p class="muted-text" style="margin: 0;">${esc(rec.message || '')}</p>
+            <p class="muted-text mb-0">${esc(rec.message || '')}</p>
             <div class="muted-text">Record: <code>${esc(rec.uri)}</code></div>
           </li>
         `
@@ -964,24 +1141,29 @@ async function renderAuditLedger() {
   return `
     <div class="section-header">
       <div>
-        <h1 id="view-heading" tabindex="-1">Verification &amp; Revocation Audit Ledger</h1>
+        <h1 id="view-heading" tabindex="-1">Verification, Labeler &amp; Revocation Audit Ledger</h1>
         <p class="muted-text">
-          Mode A inline signatures scale with zero Game-PDS writes during normal gameplay, while <code>games.opengaming.revocation</code> records let publishers surgically invalidate cheated <code>attestationCid</code>s or pre-patch exploit windows.
+          Co-equal moderation: publisher <code>games.opengaming.revocation</code> records handle surgical <code>attestationCid</code> &amp; patch-cutoff invalidation, while ATProto Labelers (<code>com.atproto.label.defs#label</code>) provide federated anti-cheat moderation and post-EoS community replay verification.
         </p>
       </div>
     </div>
 
-    <div class="two-col-grid">
+    <div class="two-col-grid section-block">
       <section>
         <h2>Published Revocations (<code>games.opengaming.revocation</code>)</h2>
         ${revBody}
       </section>
 
       <section>
-        <h2>Excluded Player Records (Revoked or Unverified)</h2>
-        ${rejectedBody}
+        <h2>ATProto Labeler Events (<code>com.atproto.label.defs#label</code>)</h2>
+        ${labelsBody}
       </section>
     </div>
+
+    <section class="section-block">
+      <h2>Excluded Player Records (Revoked, Labeled, or Unverified)</h2>
+      ${rejectedBody}
+    </section>
   `;
 }
 
@@ -1001,7 +1183,7 @@ async function renderDevelopers() {
     .map(
       (doc) => `
       <details name="lexicon-accordion" class="card">
-        <summary style="cursor: pointer; font-weight: 700;">
+        <summary class="lexicon-summary">
           <code>${esc(doc.id)}</code> &mdash; <span class="muted-text">${esc(doc.description || '')}</span>
         </summary>
         <pre tabindex="0"><code>${esc(JSON.stringify(doc, null, 2))}</code></pre>
@@ -1015,10 +1197,46 @@ async function renderDevelopers() {
       <div>
         <h1 id="view-heading" tabindex="-1">Open Gaming Lexicons &amp; XRPC Endpoints</h1>
         <p class="muted-text">
-          9 self-contained AT Protocol Lexicon v1 schemas under <code>games.opengaming.*</code> (designed for 1:1 adoption into <code>games.atmosphere.*</code>).
+          9 self-contained AT Protocol Lexicon v1 schemas under <code>games.opengaming.*</code> (designed for 1:1 adoption into the ATmosphere Gaming Working Group namespace).
         </p>
       </div>
     </div>
+
+    <section class="section-block">
+      <h2>Schema Design Highlights</h2>
+      <ul class="cards-grid" role="list">
+        <li class="card">
+          <h3>Spoiler-Proof Hidden Stubs + ATProto Spaces</h3>
+          <p class="muted-text">
+            <code>achievement.definition</code> allows omitting <code>title</code>, <code>description</code>, and <code>icon</code> when <code>hidden: true</code>, preventing Firehose/PDS spoiler leaks while pointing to an access-controlled <code>hiddenSpace</code> URI revealed upon unlock.
+          </p>
+        </li>
+        <li class="card">
+          <h3>Forward-Compatible Component Maps &amp; Open Unions</h3>
+          <p class="muted-text">
+            Multi-component leaderboards use a dictionary <code>components</code> map (<code>$keyFormat</code>/<code>$valueType</code> convention + <code>componentOrder</code>) positioned for zero-migration adoption of the proposed Lexicon <code>map</code> type—without breaking PDS records or DAG-CBOR attestation CIDs—plus open-union <code>details</code> (<code>#judgmentBreakdown</code>).
+          </p>
+        </li>
+        <li class="card">
+          <h3>Legal Chart / Build Hashes (<code>rankedVersions</code>)</h3>
+          <p class="muted-text">
+            Leaderboards declare legal chart/patch hashes via <code>rankedVersions</code>; <code>getScores</code> filters active rankings by <code>version</code> while keeping historical pre-patch scores intact in players' PDSs.
+          </p>
+        </li>
+        <li class="card">
+          <h3>EoS Continuity, Multi-Issuer &amp; Replay Blobs</h3>
+          <p class="muted-text">
+            <code>trustedIssuers</code> lets federated hosts and post-EoS revival servers attest runs; <code>$sig.rkey</code> prevents label-evasion copying; optional <code>replay</code> blobs + <code>verified-replay</code> labels enable serverless verification.
+          </p>
+        </li>
+        <li class="card">
+          <h3>ATProto Labelers + Publisher Revocations</h3>
+          <p class="muted-text">
+            Co-equal moderation folding <code>com.atproto.label.defs#label</code> events (<code>!cheat</code>, <code>neg: true</code> appeals) alongside publisher <code>games.opengaming.revocation</code> records, plus symmetric optional <code>definitionCid</code> across <code>unlock</code>, <code>progress</code>, and <code>score</code>.
+          </p>
+        </li>
+      </ul>
+    </section>
 
     <section class="card section-block">
       <h2>Live Public XRPC Endpoints on This AppView</h2>
@@ -1038,7 +1256,7 @@ async function renderDevelopers() {
 
     <section class="section-block">
       <h2>Canonical Lexicon v1 Schemas (${Number(lexicons.length)})</h2>
-      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+      <div class="stack-list">
         ${schemasHtml}
       </div>
     </section>
@@ -1168,9 +1386,13 @@ document.addEventListener('submit', (e) => {
     const lbUri = e.target.getAttribute('data-lb-uri');
     const timeframe = e.target.getAttribute('data-timeframe') || 'allTime';
     const scope = e.target.getAttribute('data-scope') || 'social';
+    const sortBy = e.target.getAttribute('data-sort-by') || '';
+    const version = e.target.getAttribute('data-version') || '';
     const viewer = document.getElementById('lb-viewer-input')?.value.trim() || '';
     const next = new URLSearchParams({ leaderboard: lbUri, timeframe, scope });
     if (viewer) next.set('viewer', viewer);
+    if (sortBy) next.set('sortBy', sortBy);
+    if (version) next.set('version', version);
     navigateTo(`/leaderboards?${next.toString()}`);
   }
 });

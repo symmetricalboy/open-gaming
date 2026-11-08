@@ -1,15 +1,15 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.leaderboard.score",
-  "description": "A signed leaderboard score entry stored in a player's repository.",
+  "description": "A leaderboard score entry stored in a player's repository.",
   "defs": {
     "main": {
       "type": "record",
-      "description": "Published in the player's PDS when recording a score for a `games.opengaming.leaderboard.definition` according to its `recordPolicy` (`bestOnly`, `perWindowBest`, or `everyRun`). Legitimacy is proven via inline CID-first cryptographic `signatures` from the game publisher's `#attestations` DID key (and subject to `games.opengaming.revocation` records in the game's PDS).",
+      "description": "Published in the player's PDS when recording a run for a `games.opengaming.leaderboard.definition`. Supports single-integer `score`, multi-component `components` (Points + Time + Accuracy + Lamps), open-union genre `details` (such as rhythm-game `#judgmentBreakdown`), chart/build `version` hashes, deterministic `replay` blobs for post-EoS server-free verification, and optional multi-issuer inline `signatures`.",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["leaderboard", "score", "recordedAt"],
+        "required": ["leaderboard", "recordedAt"],
         "properties": {
           "leaderboard": {
             "type": "string",
@@ -33,18 +33,42 @@
           },
           "score": {
             "type": "integer",
-            "description": "Raw integer score value (e.g. points, milliseconds, or fixed-decimal integer per `leaderboard.definition#scoreFormat`)."
+            "description": "Headline integer score value (e.g. points, milliseconds, or `defaultComponent` value). Recommended on all records so generic gamercards can render rankings without custom component logic; optional when `components` is provided."
           },
           "displayScore": {
             "type": "string",
             "maxGraphemes": 64,
             "maxLength": 128,
-            "description": "Optional pre-formatted fallback display string (e.g. `42 pts`, `1:06.03`) for lightweight feed viewers."
+            "description": "Optional pre-formatted fallback display string (e.g. `42 pts`, `1:06.03`, `99.42% · FC`) for lightweight feed viewers."
+          },
+          "components": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#scoreComponentValMap",
+            "description": "Optional dictionary map of component values keyed by the component keys declared in `leaderboard.definition#components`. Forward-compatible with the proposed Lexicon `map` schema type with zero wire or attestation CID migration."
+          },
+          "details": {
+            "type": "union",
+            "description": "Optional open-union genre breakdown (e.g. `games.opengaming.defs#judgmentBreakdown` for rhythm games, or any custom `$type` lexicon object).",
+            "refs": [
+              "games.opengaming.defs#judgmentBreakdown"
+            ],
+            "closed": false
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional hash or version tag of the chart, map, or game build this score was earned on (matched against `leaderboard.definition#rankedVersions`)."
+          },
+          "replay": {
+            "type": "blob",
+            "accept": ["*/*"],
+            "maxSize": 2000000,
+            "description": "Optional deterministic input log or ghost replay blob stored in the player's PDS, enabling asynchronous community Labeler or AppView verification even after official server End-of-Service (EoS)."
           },
           "tag": {
             "type": "string",
             "maxLength": 64,
-            "description": "Optional short metadata tag attached to the run (modeled on Play Games Services `scoreTag`, e.g. character/seed/breakdown like `posts:30,likes:12`)."
+            "description": "Optional short metadata tag attached to the run (e.g. `posts:30,likes:12`)."
           },
           "recordedAt": {
             "type": "string",
@@ -54,7 +78,7 @@
           "signatures": {
             "type": "array",
             "maxLength": 8,
-            "description": "Inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`) signed by the game publisher's `#attestations` DID key over the repository-bound DAG-CBOR CID of this record. Public leaderboards SHOULD default to verified, non-revoked entries.",
+            "description": "Optional inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`). Kept optional so games remain playable and PDS-writable after server EoS.",
             "items": {
               "type": "union",
               "refs": [

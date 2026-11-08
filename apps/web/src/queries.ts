@@ -1,13 +1,22 @@
 import {
+  formatComponentValue,
   formatScore,
+  getOrderedComponentIds,
+  getScoreSortMetric,
   getTimeframeStartMs,
   isBetterScore,
+  isVersionLegal,
+  resolveActiveLabels,
   sortAchievementDefinitions,
   summarizeActorProfile,
   type AchievementDefinitionRecord,
   type AchievementUnlockRecord,
   type ActorProfileSummary,
+  type AtprotoLabel,
+  type LeaderboardDefinitionRecord,
+  type LeaderboardScoreRecord,
   type LeaderboardSortOrder,
+  type ScoreComponentValMap,
   type ScoreFormat,
   type Timeframe,
 } from '@opengaming/sdk';
@@ -20,9 +29,15 @@ export interface XrpcScoreEntry {
   handle?: string;
   uri: string;
   attestationCid?: string;
+  issuer?: string;
   score: number;
   displayScore?: string;
+  components?: ScoreComponentValMap;
+  version?: string;
+  hasReplay?: boolean;
+  replayCid?: string;
   tag?: string;
+  labels?: string[];
   recordedAt: string;
   verified: boolean;
   revoked?: boolean;
@@ -93,6 +108,8 @@ export class AppViewQueries {
     timeframe = 'allTime',
     scope = 'public',
     viewer,
+    sortBy,
+    version,
     verifiedOnly = true,
     limit = 25,
     cursor,
@@ -102,12 +119,15 @@ export class AppViewQueries {
     timeframe?: Timeframe;
     scope?: 'public' | 'social';
     viewer?: string;
+    sortBy?: string;
+    version?: string;
     verifiedOnly?: boolean;
     limit?: number;
     cursor?: string;
     now?: Date;
   }): Promise<{
     leaderboard: string;
+    sortedBy?: string;
     entries: XrpcScoreEntry[];
     viewerEntry?: XrpcScoreEntry;
     cursor?: string;
@@ -120,12 +140,30 @@ export class AppViewQueries {
       throw Object.assign(new Error(`Leaderboard not found: ${leaderboard}`), { status: 404 });
     }
 
+    const parsedDef = JSON.parse(String(lbRow.raw_json)) as LeaderboardDefinitionRecord;
+    const orderedCompIds = getOrderedComponentIds(parsedDef);
+    const hasComponents = orderedCompIds.length > 0;
+
+    if (sortBy && hasComponents) {
+      const requestedComp = parsedDef.components?.[sortBy];
+      if (!requestedComp) {
+        throw Object.assign(new Error(`Unknown leaderboard component \`sortBy\`: ${sortBy}`), { status: 400 });
+      }
+      if (requestedComp.$type === 'games.opengaming.defs#textComponentDef') {
+        throw Object.assign(new Error(`Text component \`${sortBy}\` cannot be used for ranking.`), { status: 400 });
+      }
+    }
+
+    const effectiveSortedBy = hasComponents
+      ? sortBy ?? parsedDef.defaultComponent ?? orderedCompIds[0]
+      : undefined;
+
     const allowedTimeframes = JSON.parse(String(lbRow.timeframes_json)) as Timeframe[];
     const effectiveTimeframe: Timeframe = allowedTimeframes.includes(timeframe)
       ? timeframe
       : allowedTimeframes[0] ?? 'allTime';
 
-    const sortOrder = String(lbRow.sort_order) as LeaderboardSortOrder;
+    const fallbackSortOrder = String(lbRow.sort_order) as LeaderboardSortOrder;
     const scoreFormat = JSON.parse(String(lbRow.score_format_json)) as ScoreFormat;
     const windowStartMs = getTimeframeStartMs(effectiveTimeframe, now);
 
@@ -147,51 +185,93 @@ export class AppViewQueries {
       .prepare('SELECT * FROM leaderboard_scores WHERE leaderboard_uri = ?')
       .all(leaderboard) as Array<Record<string, any>>;
 
-    // Filter by timeframe, verification/revocation, and social graph
+    // Filter by timeframe, verification/revocation, version legality, and social graph
     const eligible = rawRows.filter((r) => {
       const ts = Date.parse(String(r.recorded_at));
       if (!Number.isNaN(ts) && ts < windowStartMs) return false;
       if (verifiedOnly && (Number(r.verified) !== 1 || Number(r.revoked) === 1)) return false;
       if (socialDids && !socialDids.has(String(r.player_did))) return false;
+
+      const rowVersion = r.version ? String(r.version) : undefined;
+      if (version) {
+        if (rowVersion !== version) return false;
+      } else if (parsedDef.rankedVersions && parsedDef.rankedVersions.length > 0) {
+        if (!isVersionLegal(rowVersion, parsedDef.rankedVersions)) return false;
+      }
       return true;
     });
 
-    // Deduplicate to each player's best score within the timeframe (tie-break by earliest recorded_at)
-    const bestByPlayer = new Map<string, Record<string, any>>();
+    interface RowWithMetric {
+      row: Record<string, any>;
+      sortableValue: number;
+      sortOrder: LeaderboardSortOrder;
+      displayScore: string;
+      components?: ScoreComponentValMap;
+    }
+
+    const extractedRows: RowWithMetric[] = [];
     for (const row of eligible) {
-      const playerDid = String(row.player_did);
-      const prev = bestByPlayer.get(playerDid);
-      if (!prev) {
-        bestByPlayer.set(playerDid, row);
-        continue;
-      }
-      const candidateScore = Number(row.score);
-      const existingScore = Number(prev.score);
-      if (isBetterScore(candidateScore, existingScore, sortOrder)) {
-        bestByPlayer.set(playerDid, row);
-      } else if (
-        candidateScore === existingScore &&
-        Date.parse(String(row.recorded_at)) < Date.parse(String(prev.recorded_at))
-      ) {
-        bestByPlayer.set(playerDid, row);
+      if (hasComponents) {
+        const scoreRec = JSON.parse(String(row.raw_json)) as LeaderboardScoreRecord;
+        const metric = getScoreSortMetric(scoreRec, parsedDef, effectiveSortedBy);
+        if (!metric) continue;
+        extractedRows.push({
+          row,
+          sortableValue: Math.trunc(metric.sortableValue),
+          sortOrder: metric.sortOrder,
+          displayScore: metric.displayValue,
+          components: scoreRec.components,
+        });
+      } else {
+        const rawScore = Math.trunc(Number(row.score));
+        const displayScore = row.display_score
+          ? String(row.display_score)
+          : formatScore(rawScore, scoreFormat);
+        extractedRows.push({
+          row,
+          sortableValue: rawScore,
+          sortOrder: fallbackSortOrder,
+          displayScore,
+          components: row.components_json
+            ? (JSON.parse(String(row.components_json)) as ScoreComponentValMap)
+            : undefined,
+        });
       }
     }
 
-    const sortedRows = [...bestByPlayer.values()].sort((a, b) => {
-      const sa = Number(a.score);
-      const sb = Number(b.score);
-      if (sa !== sb) {
-        return sortOrder === 'smallerIsBetter' ? sa - sb : sb - sa;
+    // Deduplicate to each player's best score within the timeframe (tie-break by earliest recorded_at)
+    const bestByPlayer = new Map<string, RowWithMetric>();
+    for (const item of extractedRows) {
+      const playerDid = String(item.row.player_did);
+      const prev = bestByPlayer.get(playerDid);
+      if (!prev) {
+        bestByPlayer.set(playerDid, item);
+        continue;
       }
-      return Date.parse(String(a.recorded_at)) - Date.parse(String(b.recorded_at));
+      if (isBetterScore(item.sortableValue, prev.sortableValue, item.sortOrder)) {
+        bestByPlayer.set(playerDid, item);
+      } else if (
+        item.sortableValue === prev.sortableValue &&
+        Date.parse(String(item.row.recorded_at)) < Date.parse(String(prev.row.recorded_at))
+      ) {
+        bestByPlayer.set(playerDid, item);
+      }
+    }
+
+    const sortedItems = [...bestByPlayer.values()].sort((a, b) => {
+      if (a.sortableValue !== b.sortableValue) {
+        return a.sortOrder === 'smallerIsBetter'
+          ? a.sortableValue - b.sortableValue
+          : b.sortableValue - a.sortableValue;
+      }
+      return Date.parse(String(a.row.recorded_at)) - Date.parse(String(b.row.recorded_at));
     });
 
-    const rankedEntries: XrpcScoreEntry[] = sortedRows.map((row, idx) => {
+    const rankedEntries: XrpcScoreEntry[] = sortedItems.map(({ row, sortableValue, displayScore, components }, idx) => {
       const actor = this.getActorMeta(String(row.player_did));
-      const rawScore = Number(row.score);
-      const displayScore = row.display_score
-        ? String(row.display_score)
-        : formatScore(rawScore, scoreFormat);
+      const labels: string[] = row.active_labels_json ? JSON.parse(String(row.active_labels_json)) : [];
+      const issuer = row.issuer_did && String(row.issuer_did).startsWith('did:') ? String(row.issuer_did) : undefined;
+      const replayCid = row.replay_cid ? String(row.replay_cid) : undefined;
 
       return {
         rank: idx + 1,
@@ -199,9 +279,14 @@ export class AppViewQueries {
         ...(actor.handle ? { handle: actor.handle } : {}),
         uri: String(row.uri),
         ...(row.attestation_cid ? { attestationCid: String(row.attestation_cid) } : {}),
-        score: rawScore,
+        ...(issuer ? { issuer } : {}),
+        score: sortableValue,
         displayScore,
+        ...(components && !Array.isArray(components) && Object.keys(components).length > 0 ? { components } : {}),
+        ...(row.version ? { version: String(row.version) } : {}),
+        ...(replayCid ? { hasReplay: true, replayCid } : {}),
         ...(row.tag ? { tag: String(row.tag) } : {}),
+        ...(labels.length > 0 ? { labels } : {}),
         recordedAt: String(row.recorded_at),
         verified: Number(row.verified) === 1 && Number(row.revoked) === 0,
         ...(!verifiedOnly ? { revoked: Number(row.revoked) === 1 } : {}),
@@ -219,6 +304,7 @@ export class AppViewQueries {
 
     return {
       leaderboard,
+      ...(effectiveSortedBy ? { sortedBy: effectiveSortedBy } : {}),
       entries: page,
       ...(viewerEntry ? { viewerEntry } : {}),
       ...(nextCursor ? { cursor: nextCursor } : {}),
@@ -233,12 +319,16 @@ export class AppViewQueries {
     timeframe = 'allTime',
     scope = 'public',
     viewer,
+    sortBy,
+    version,
     limit = 50,
   }: {
     leaderboard: string;
     timeframe?: Timeframe;
     scope?: 'public' | 'social';
     viewer?: string;
+    sortBy?: string;
+    version?: string;
     limit?: number;
   }) {
     const lbRow = this.db
@@ -247,6 +337,9 @@ export class AppViewQueries {
     if (!lbRow) {
       throw Object.assign(new Error(`Leaderboard not found: ${leaderboard}`), { status: 404 });
     }
+
+    const parsedDef = JSON.parse(String(lbRow.raw_json)) as LeaderboardDefinitionRecord;
+    const orderedCompIds = getOrderedComponentIds(parsedDef);
 
     const gameRow = this.db
       .prepare('SELECT uri, name, icon_url, url, developer_name FROM games WHERE uri = ?')
@@ -257,34 +350,82 @@ export class AppViewQueries {
       timeframe,
       scope,
       viewer,
+      sortBy,
+      version,
       verifiedOnly: true,
       limit,
     });
 
     const enrich = (entry: XrpcScoreEntry) => {
+      const cachedActor = this.identity.getCachedActor(entry.player);
       const actor = this.getActorMeta(entry.player);
       const row = this.db
-        .prepare('SELECT issuer_did, key_id, is_demo FROM leaderboard_scores WHERE uri = ?')
-        .get(entry.uri) as { issuer_did?: string; key_id?: string; is_demo?: number } | undefined;
+        .prepare('SELECT issuer_did, key_id, details_json, replay_cid, replay_mime, is_demo FROM leaderboard_scores WHERE uri = ?')
+        .get(entry.uri) as
+        | {
+            issuer_did?: string;
+            key_id?: string;
+            details_json?: string | null;
+            replay_cid?: string | null;
+            replay_mime?: string | null;
+            is_demo?: number;
+          }
+        | undefined;
+
+      const formattedComponents =
+        orderedCompIds.length > 0 && parsedDef.components
+          ? orderedCompIds.map((compId) => {
+              const cDef = parsedDef.components![compId];
+              const cVal = entry.components?.[compId];
+              return {
+                id: compId,
+                name: cDef.name,
+                type: cDef.$type,
+                rawValue: cVal?.value ?? null,
+                displayValue: cVal ? formatComponentValue(cVal, cDef) : '—',
+              };
+            })
+          : undefined;
+
+      const replayCid = row?.replay_cid ?? entry.replayCid;
+      const pdsBase = cachedActor?.pdsUrl ?? 'https://bsky.social';
+      const replayDownloadUrl = replayCid
+        ? `${pdsBase}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(entry.player)}&cid=${encodeURIComponent(replayCid)}`
+        : undefined;
+
       return {
         ...entry,
         displayName: actor.displayName ?? actor.handle ?? entry.player,
         avatarUrl: actor.avatarUrl,
         issuerDid: row?.issuer_did,
         keyId: row?.key_id,
+        verificationMethod: row?.key_id?.startsWith('label:') ? 'community-label' : 'attestation',
+        formattedComponents,
+        details: row?.details_json ? JSON.parse(row.details_json) : undefined,
+        replayMime: row?.replay_mime ?? undefined,
+        replayDownloadUrl,
         isDemo: row?.is_demo === 1,
       };
     };
 
     return {
+      sortedBy: xrpc.sortedBy,
+      activeVersionFilter: version,
       definition: {
         uri: String(lbRow.uri),
+        publisherDid: String(lbRow.publisher_did),
         name: String(lbRow.name),
         description: lbRow.description ? String(lbRow.description) : undefined,
         iconUrl: lbRow.icon_url ? String(lbRow.icon_url) : undefined,
         iconAlt: lbRow.icon_alt ? String(lbRow.icon_alt) : String(lbRow.name),
         sortOrder: String(lbRow.sort_order),
         scoreFormat: JSON.parse(String(lbRow.score_format_json)),
+        components: parsedDef.components,
+        componentOrder: orderedCompIds.length > 0 ? orderedCompIds : undefined,
+        defaultComponent: parsedDef.defaultComponent,
+        detailsSchema: parsedDef.detailsSchema,
+        rankedVersions: parsedDef.rankedVersions,
+        trustedIssuers: parsedDef.trustedIssuers,
         timeframes: JSON.parse(String(lbRow.timeframes_json)) as Timeframe[],
         recordPolicy: String(lbRow.record_policy),
         scoreMin: lbRow.score_min ?? undefined,
@@ -371,7 +512,7 @@ export class AppViewQueries {
     const recentScores = (
       this.db
         .prepare(
-          `SELECT s.*, l.name AS lb_name, l.score_format_json, l.icon_url AS lb_icon_url,
+          `SELECT s.*, l.name AS lb_name, l.score_format_json, l.raw_json AS lb_raw_json, l.icon_url AS lb_icon_url,
                   g.name AS game_name, g.uri AS resolved_game_uri
            FROM leaderboard_scores s
            JOIN leaderboard_definitions l ON l.uri = s.leaderboard_uri
@@ -385,6 +526,13 @@ export class AppViewQueries {
       const actor = this.getActorMeta(String(r.player_did));
       const fmt = JSON.parse(String(r.score_format_json)) as ScoreFormat;
       const score = Number(r.score);
+      let displayScore = r.display_score ? String(r.display_score) : undefined;
+      if (!displayScore && r.lb_raw_json) {
+        const lbDef = JSON.parse(String(r.lb_raw_json)) as LeaderboardDefinitionRecord;
+        if (getOrderedComponentIds(lbDef).length > 0) {
+          displayScore = getScoreSortMetric(JSON.parse(String(r.raw_json)) as LeaderboardScoreRecord, lbDef)?.displayValue;
+        }
+      }
       return {
         uri: String(r.uri),
         playerDid: actor.did,
@@ -396,7 +544,7 @@ export class AppViewQueries {
         gameUri: r.resolved_game_uri ? String(r.resolved_game_uri) : undefined,
         gameName: r.game_name ? String(r.game_name) : 'Unknown Game',
         score,
-        displayScore: r.display_score ? String(r.display_score) : formatScore(score, fmt),
+        displayScore: displayScore ?? formatScore(score, fmt),
         tag: r.tag ? String(r.tag) : undefined,
         recordedAt: String(r.recorded_at),
         attestationCid: r.attestation_cid ? String(r.attestation_cid) : undefined,
@@ -590,20 +738,36 @@ export class AppViewQueries {
       }
 
       const isHidden = Boolean(record.hidden);
+      const isRedactedStub =
+        Boolean(r.is_redacted_stub) || Boolean(isHidden && (!record.title || !record.description));
       const maskedForViewer = isHidden && !viewerUnlock;
+
+      const safeRevealedTitle = record.title ?? 'Redacted Hidden Achievement';
+      const safeRevealedDesc =
+        record.description ??
+        (record.hiddenSpace
+          ? `Spoiler-proof stub on the public PDS. Full metadata is revealed via ATProto Space: ${record.hiddenSpace}`
+          : 'Spoiler-proof stub on the public PDS. Full metadata is revealed upon unlock.');
 
       return {
         uri,
         rkey: String(r.rkey),
-        title: maskedForViewer ? 'Hidden Achievement' : record.title,
-        description: maskedForViewer ? 'Keep playing to discover and unlock this hidden milestone.' : record.description,
+        title: maskedForViewer ? 'Hidden Achievement' : safeRevealedTitle,
+        description: maskedForViewer
+          ? record.hiddenSpace
+            ? 'Spoiler-proof hidden stub — full details are gated in an access-controlled ATProto Space until unlocked.'
+            : 'Keep playing to discover and unlock this hidden milestone.'
+          : safeRevealedDesc,
         requirement: maskedForViewer ? undefined : record.requirement,
-        revealedTitle: record.title,
-        revealedDescription: record.description,
+        revealedTitle: safeRevealedTitle,
+        revealedDescription: safeRevealedDesc,
         iconUrl: r.icon_url ? String(r.icon_url) : undefined,
-        iconAlt: maskedForViewer ? 'Locked hidden achievement icon' : record.iconAlt ?? record.title,
+        iconAlt: maskedForViewer ? 'Locked hidden achievement icon' : record.iconAlt ?? safeRevealedTitle,
         tier: record.tier,
         hidden: isHidden,
+        hiddenSpace: record.hiddenSpace,
+        isRedactedStub,
+        trustedIssuers: record.trustedIssuers,
         masked: maskedForViewer,
         stepsNeeded: record.stepsNeeded,
         group: record.group,
@@ -817,6 +981,30 @@ export class AppViewQueries {
     };
   }
 
+  private getActiveLabelsForTargets(targets: string[]): AtprotoLabel[] {
+    const clean = [...new Set(targets.filter(Boolean))];
+    if (clean.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT src, uri, cid, val, neg, cts, exp
+         FROM moderation_labels
+         WHERE uri IN (${clean.map(() => '?').join(', ')})`
+      )
+      .all(...clean) as Array<Record<string, any>>;
+
+    return resolveActiveLabels(
+      rows.map((l) => ({
+        src: String(l.src),
+        uri: String(l.uri),
+        ...(l.cid ? { cid: String(l.cid) } : {}),
+        val: String(l.val),
+        neg: Number(l.neg) === 1,
+        cts: String(l.cts),
+        ...(l.exp ? { exp: String(l.exp) } : {}),
+      }))
+    );
+  }
+
   /**
    * Cryptographic Proof & Revocation Inspector (`GET /api/proof?uri=<record-at-uri>`).
    */
@@ -826,22 +1014,29 @@ export class AppViewQueries {
       .get(recordUri) as Record<string, any> | undefined;
 
     if (unlockRow) {
+      const playerDid = String(unlockRow.player_did);
       const matchingRev = unlockRow.attestation_cid
         ? (this.db
             .prepare('SELECT * FROM revocations WHERE attestation_cid = ? OR record_uri = ? LIMIT 1')
             .get(String(unlockRow.attestation_cid), recordUri) as Record<string, any> | undefined)
-        : undefined;
+        : (this.db
+            .prepare('SELECT * FROM revocations WHERE record_uri = ? LIMIT 1')
+            .get(recordUri) as Record<string, any> | undefined);
+
+      const activeLabels = this.getActiveLabelsForTargets([recordUri, playerDid]);
 
       return {
         kind: 'achievement.unlock',
         uri: String(unlockRow.uri),
-        playerDid: String(unlockRow.player_did),
+        playerDid,
         subjectUri: String(unlockRow.achievement_uri),
         issuerDid: unlockRow.issuer_did ? String(unlockRow.issuer_did) : undefined,
         keyId: unlockRow.key_id ? String(unlockRow.key_id) : undefined,
         attestationCid: unlockRow.attestation_cid ? String(unlockRow.attestation_cid) : undefined,
         verified: Number(unlockRow.verified) === 1 && Number(unlockRow.revoked) === 0,
         revoked: Number(unlockRow.revoked) === 1,
+        labelInvalidated: Number(unlockRow.label_invalidated) === 1,
+        activeLabels,
         verificationError: unlockRow.verification_error ? String(unlockRow.verification_error) : undefined,
         verificationMessage: unlockRow.verification_message ? String(unlockRow.verification_message) : undefined,
         record: JSON.parse(String(unlockRow.raw_json)),
@@ -855,22 +1050,31 @@ export class AppViewQueries {
       .get(recordUri) as Record<string, any> | undefined;
 
     if (scoreRow) {
+      const playerDid = String(scoreRow.player_did);
       const matchingRev = scoreRow.attestation_cid
         ? (this.db
             .prepare('SELECT * FROM revocations WHERE attestation_cid = ? OR record_uri = ? LIMIT 1')
             .get(String(scoreRow.attestation_cid), recordUri) as Record<string, any> | undefined)
-        : undefined;
+        : (this.db
+            .prepare('SELECT * FROM revocations WHERE record_uri = ? LIMIT 1')
+            .get(recordUri) as Record<string, any> | undefined);
+
+      const activeLabels = this.getActiveLabelsForTargets([recordUri, playerDid]);
 
       return {
         kind: 'leaderboard.score',
         uri: String(scoreRow.uri),
-        playerDid: String(scoreRow.player_did),
+        playerDid,
         subjectUri: String(scoreRow.leaderboard_uri),
         issuerDid: scoreRow.issuer_did ? String(scoreRow.issuer_did) : undefined,
         keyId: scoreRow.key_id ? String(scoreRow.key_id) : undefined,
         attestationCid: scoreRow.attestation_cid ? String(scoreRow.attestation_cid) : undefined,
+        version: scoreRow.version ? String(scoreRow.version) : undefined,
+        replayCid: scoreRow.replay_cid ? String(scoreRow.replay_cid) : undefined,
         verified: Number(scoreRow.verified) === 1 && Number(scoreRow.revoked) === 0,
         revoked: Number(scoreRow.revoked) === 1,
+        labelInvalidated: Number(scoreRow.label_invalidated) === 1,
+        activeLabels,
         verificationError: scoreRow.verification_error ? String(scoreRow.verification_error) : undefined,
         verificationMessage: scoreRow.verification_message ? String(scoreRow.verification_message) : undefined,
         record: JSON.parse(String(scoreRow.raw_json)),
@@ -908,6 +1112,20 @@ export class AppViewQueries {
         isDemo: Number(r.is_demo) === 1,
       };
     });
+
+    const moderationLabels = (
+      this.db
+        .prepare('SELECT src, uri, cid, val, neg, cts, exp FROM moderation_labels ORDER BY cts DESC LIMIT 50')
+        .all() as Array<Record<string, any>>
+    ).map((l) => ({
+      src: String(l.src),
+      uri: String(l.uri),
+      cid: l.cid ? String(l.cid) : undefined,
+      val: String(l.val),
+      neg: Number(l.neg) === 1,
+      cts: String(l.cts),
+      exp: l.exp ? String(l.exp) : undefined,
+    }));
 
     const rejectedRecords = [
       ...(
@@ -952,6 +1170,7 @@ export class AppViewQueries {
 
     return {
       revocations,
+      moderationLabels,
       rejectedRecords,
     };
   }

@@ -176,10 +176,10 @@ export async function checkRevocationOnPds({
 }
 
 /**
- * Evaluate whether an unlock, progress, or score record is invalidated by any publisher revocation.
+ * Evaluate whether an unlock, progress, or score record is invalidated by any publisher/issuer revocation.
  *
- * Enforces publisher authority: a revocation ONLY applies if it was published by the same DID
- * that owns the target achievement/leaderboard/game (`issuerDid`).
+ * Enforces authority: a revocation ONLY applies if it was published by either the DID that owns the
+ * target definition (`definitionPublisherDid`) or the DID that signed the attestation (`issuerDid`).
  */
 export function isRecordRevoked({
   attestationCid,
@@ -187,6 +187,7 @@ export function isRecordRevoked({
   record,
   recordUri,
   issuerDid,
+  definitionPublisherDid,
   revocations,
 }: {
   attestationCid: string;
@@ -194,6 +195,7 @@ export function isRecordRevoked({
   record: Record<string, unknown>;
   recordUri?: string;
   issuerDid: string;
+  definitionPublisherDid?: string;
   revocations: Array<RevocationRecord | RevocationWithOrigin>;
 }): RevocationRecord | null {
   const achievementUri = typeof record.achievement === 'string' ? record.achievement : undefined;
@@ -209,6 +211,15 @@ export function isRecordRevoked({
           : undefined;
   const recordTimeMs = recordTimestampStr ? Date.parse(recordTimestampStr) : NaN;
 
+  const authorizedPublishers = new Set<string>([issuerDid]);
+  if (definitionPublisherDid) {
+    authorizedPublishers.add(definitionPublisherDid);
+  }
+  const inferredTargetOwner = extractDidFromAtUri(achievementUri ?? leaderboardUri ?? gameUri ?? '');
+  if (inferredTargetOwner) {
+    authorizedPublishers.add(inferredTargetOwner);
+  }
+
   for (const entry of revocations) {
     const isWrapped = 'value' in entry && 'publisherDid' in entry;
     const rev = isWrapped ? (entry as RevocationWithOrigin).value : (entry as RevocationRecord);
@@ -216,12 +227,12 @@ export function isRecordRevoked({
       ? (entry as RevocationWithOrigin).publisherDid
       : extractDidFromAtUri(rev.subject);
 
-    // Authority check: Game B can never revoke Game A's records
-    if (revOriginDid && revOriginDid !== issuerDid) {
+    // Authority check: unrelated Studio B can never revoke Studio A's records
+    if (!revOriginDid || !authorizedPublishers.has(revOriginDid)) {
       continue;
     }
     const subjectOwnerDid = extractDidFromAtUri(rev.subject);
-    if (subjectOwnerDid && subjectOwnerDid !== issuerDid) {
+    if (subjectOwnerDid && !authorizedPublishers.has(subjectOwnerDid)) {
       continue;
     }
 
@@ -257,7 +268,6 @@ export function isRecordRevoked({
       if (gameUri && rev.subject === gameUri) {
         return rev;
       }
-      // Also match if no explicit game field was set on the record, when subject's repo matches issuerDid
       if (!gameUri && rev.subject.includes('/games.atmosphere.define/')) {
         return rev;
       }

@@ -5,14 +5,19 @@ import { verifySignature, type Keypair } from '@atproto/crypto';
 import { DidResolver } from '@atproto/identity';
 import { fromString, toString } from 'uint8arrays';
 import { ATTESTATION_KEY_FRAGMENT, NSIDS } from './constants.js';
+import { findInvalidatingLabels, findVerificationLabels } from './labels.js';
 import { isRecordRevoked } from './revocation.js';
 import type {
   AchievementProgressRecord,
   AchievementUnlockRecord,
+  AtprotoLabel,
+  BlobRef,
   InlineSignature,
   LeaderboardScoreRecord,
   RevocationRecord,
   RevocationWithOrigin,
+  ScoreComponentValMap,
+  ScoreDetails,
   VerificationResult,
 } from './types.js';
 
@@ -21,14 +26,41 @@ export interface SignatureMetadataInput {
   key: string;
   issuer?: string;
   issuedAt?: string;
+  rkey?: string;
   [extra: string]: unknown;
+}
+
+function normalizeRecordValue(value: unknown): unknown {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    return { $bytes: toString(value, 'base64') };
+  }
+  const asCid = CID.asCID(value);
+  if (asCid) {
+    return { $link: asCid.toString() };
+  }
+  if (typeof (value as { toJSON?: unknown }).toJSON === 'function' && !(value instanceof Date)) {
+    return normalizeRecordValue((value as { toJSON: () => unknown }).toJSON());
+  }
+  if (Array.isArray(value)) {
+    return value.filter((v) => v !== undefined).map((v) => normalizeRecordValue(v));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v !== undefined) {
+      out[k] = normalizeRecordValue(v);
+    }
+  }
+  return out;
 }
 
 function assertNoUndefined(value: unknown, path = 'record'): void {
   if (value === undefined) {
     throw new Error(`Cannot DAG-CBOR encode: "${path}" is undefined.`);
   }
-  if (value === null || typeof value !== 'object' || value instanceof Uint8Array) {
+  if (value === null || typeof value !== 'object' || value instanceof Uint8Array || CID.asCID(value)) {
     return;
   }
   if (Array.isArray(value)) {
@@ -57,7 +89,8 @@ function stripUndefinedShallow<T extends Record<string, unknown>>(obj: T): Recor
  * Compute the deterministic repository-bound CIDv1 (`bafy...`) for an Open Gaming record,
  * following the `badge.blue` CID-First Attestation Specification:
  * 1. Strip `signatures` from the record.
- * 2. Strip `cid` and `signature` from the signature metadata, and inject `repository: playerDid`.
+ * 2. Strip `cid` and `signature` from the signature metadata, and inject `repository: playerDid`
+ *    (plus `rkey` if included in signature metadata).
  * 3. Insert prepared metadata as `$sig` on the record, encode to DAG-CBOR, and SHA-256 -> CIDv1.
  */
 export async function computeAttestationCid({
@@ -81,8 +114,10 @@ export async function computeAttestationCid({
     repository: repositoryDid,
   });
 
+  const normalizedRecord = normalizeRecordValue(recordWithoutSigs) as Record<string, unknown>;
+
   const attestationPayload = stripUndefinedShallow({
-    ...recordWithoutSigs,
+    ...normalizedRecord,
     $sig: sigPayload,
   });
 
@@ -103,6 +138,7 @@ export async function createInlineSignature({
   playerDid,
   signingKey,
   issuedAt = new Date().toISOString(),
+  rkey,
   keyId,
 }: {
   record: Record<string, unknown>;
@@ -110,6 +146,8 @@ export async function createInlineSignature({
   playerDid: string;
   signingKey: Keypair;
   issuedAt?: string;
+  /** Optional target `rkey` binding so signed payloads cannot be moved to evade URI labels. */
+  rkey?: string;
   keyId?: string;
 }): Promise<{ signature: InlineSignature; attestationCid: string }> {
   if (!issuerDid.startsWith('did:')) {
@@ -121,6 +159,7 @@ export async function createInlineSignature({
     key: resolvedKeyId,
     issuer: issuerDid,
     issuedAt,
+    rkey,
   }) as SignatureMetadataInput;
 
   const cid = await computeAttestationCid({
@@ -137,6 +176,7 @@ export async function createInlineSignature({
     key: resolvedKeyId,
     issuer: issuerDid,
     issuedAt,
+    ...(rkey ? { rkey } : {}),
     cid: attestationCid,
     signature: { $bytes: toString(sigBytes, 'base64') },
   };
@@ -156,6 +196,7 @@ export async function createSignedUnlock({
   definitionCid,
   stepsCompleted,
   unlockedAt = new Date().toISOString(),
+  rkey,
   keyId,
 }: {
   achievement: string;
@@ -166,6 +207,7 @@ export async function createSignedUnlock({
   definitionCid?: string;
   stepsCompleted?: number;
   unlockedAt?: string;
+  rkey?: string;
   keyId?: string;
 }): Promise<{ record: AchievementUnlockRecord; attestationCid: string }> {
   const unsigned = stripUndefinedShallow({
@@ -184,6 +226,7 @@ export async function createSignedUnlock({
     playerDid,
     signingKey,
     issuedAt: unlockedAt,
+    rkey,
     keyId,
   });
 
@@ -200,26 +243,31 @@ export async function createSignedProgress({
   achievement,
   currentSteps,
   stepsNeeded,
+  definitionCid,
   playerDid,
   issuerDid,
   signingKey,
   game,
   updatedAt = new Date().toISOString(),
+  rkey,
   keyId,
 }: {
   achievement: string;
   currentSteps: number;
   stepsNeeded?: number;
+  definitionCid?: string;
   playerDid: string;
   issuerDid: string;
   signingKey: Keypair;
   game?: string;
   updatedAt?: string;
+  rkey?: string;
   keyId?: string;
 }): Promise<{ record: AchievementProgressRecord; attestationCid: string }> {
   const unsigned = stripUndefinedShallow({
     $type: NSIDS.AchievementProgress,
     achievement,
+    definitionCid,
     game,
     currentSteps,
     stepsNeeded,
@@ -232,6 +280,7 @@ export async function createSignedProgress({
     playerDid,
     signingKey,
     issuedAt: updatedAt,
+    rkey,
     keyId,
   });
 
@@ -241,12 +290,28 @@ export async function createSignedProgress({
   };
 }
 
+function inferHeadlineScoreFromComponents(components?: ScoreComponentValMap): number | undefined {
+  if (!components || typeof components !== 'object' || Array.isArray(components)) return undefined;
+  for (const comp of Object.values(components)) {
+    if (comp && typeof comp.value === 'number' && Number.isInteger(comp.value)) {
+      return comp.value;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Build and cryptographically sign a `games.opengaming.leaderboard.score` record for a player.
+ * Supports single-integer `score`, multi-component `components` maps, genre `details`, `version`
+ * hashes, and `replay` blobs.
  */
 export async function createSignedScore({
   leaderboard,
   score,
+  components,
+  details,
+  version,
+  replay,
   playerDid,
   issuerDid,
   signingKey,
@@ -255,10 +320,15 @@ export async function createSignedScore({
   displayScore,
   tag,
   recordedAt = new Date().toISOString(),
+  rkey,
   keyId,
 }: {
   leaderboard: string;
-  score: number;
+  score?: number;
+  components?: ScoreComponentValMap;
+  details?: ScoreDetails;
+  version?: string;
+  replay?: BlobRef;
   playerDid: string;
   issuerDid: string;
   signingKey: Keypair;
@@ -267,16 +337,31 @@ export async function createSignedScore({
   displayScore?: string;
   tag?: string;
   recordedAt?: string;
+  rkey?: string;
   keyId?: string;
 }): Promise<{ record: LeaderboardScoreRecord; attestationCid: string }> {
+  const effectiveScore = score ?? inferHeadlineScoreFromComponents(components);
+  const hasComponents =
+    components !== undefined &&
+    typeof components === 'object' &&
+    !Array.isArray(components) &&
+    Object.keys(components).length > 0;
+  if (effectiveScore === undefined && !hasComponents) {
+    throw new Error('createSignedScore requires either `score` or at least one entry in `components`.');
+  }
+
   const unsigned = stripUndefinedShallow({
     $type: NSIDS.LeaderboardScore,
     leaderboard,
     definitionCid,
     game,
     player: playerDid,
-    score,
+    score: effectiveScore,
     displayScore,
+    components,
+    details,
+    version,
+    replay,
     tag,
     recordedAt,
   }) as unknown as LeaderboardScoreRecord;
@@ -287,6 +372,7 @@ export async function createSignedScore({
     playerDid,
     signingKey,
     issuedAt: recordedAt,
+    rkey,
     keyId,
   });
 
@@ -302,6 +388,13 @@ function extractIssuerFromAtUri(atUri?: string): string | undefined {
   return host?.startsWith('did:') ? host : undefined;
 }
 
+function extractRkeyFromAtUri(atUri?: string): string | undefined {
+  if (!atUri || !atUri.startsWith('at://')) return undefined;
+  const parts = atUri.slice('at://'.length).split('/');
+  if (parts.length < 3) return undefined;
+  return parts.slice(2).join('/') || undefined;
+}
+
 function extractSignatureBytes(sigField: InlineSignature['signature']): Uint8Array {
   if (sigField instanceof Uint8Array) {
     return sigField;
@@ -309,7 +402,6 @@ function extractSignatureBytes(sigField: InlineSignature['signature']): Uint8Arr
   if (sigField && typeof sigField === 'object' && '$bytes' in sigField) {
     const raw = (sigField as { $bytes: string | Uint8Array }).$bytes;
     if (raw instanceof Uint8Array) return raw;
-    // Support both padded and unpadded base64
     const normalized = raw.length % 4 === 0 ? raw : raw + '='.repeat(4 - (raw.length % 4));
     return fromString(normalized, 'base64');
   }
@@ -343,24 +435,23 @@ function extractDidKeyFromDidDoc(didDoc: Record<string, unknown>, issuerDid: str
 
 /**
  * Verify a Mode A inline-signed Open Gaming record (`achievement.unlock`, `achievement.progress`,
- * or `leaderboard.score`) AND check publisher `games.opengaming.revocation` rules.
- *
- * Security checks performed:
- * 1. If `record.player` is present, it MUST equal `playerDid` (the repository DID housing the record).
- * 2. Expected publisher DID is inferred from the `achievement` / `leaderboard` AT-URI (or `expectedIssuerDid`),
- *    ensuringGame B cannot forge signatures for Game A's achievements!
- * 3. Public signing key is resolved from the publisher's DID document (`#attestations`), or supplied via `publicDidKey` in offline tests.
- * 4. Repository-bound `attestationCid` is recomputed with `repository: playerDid` (defeating cross-repo replay).
- * 5. ECDSA signature is verified over `attestationCid` bytes.
- * 6. Checks both supplied `revocations` AND optional `checkRemoteRevocation` callback so revoked exploits are rejected.
+ * or `leaderboard.score`), supporting multi-issuer post-EoS federation (`trustedIssuerDids` /
+ * `allowAnyValidIssuer`), `rkey` binding, publisher `games.opengaming.revocation` records, and
+ * ATProto Labeler moderation (`activeLabels`).
  */
 export async function verifyRecordAttestation({
   record,
   playerDid,
   recordUri,
+  recordCid,
   expectedIssuerDid,
+  trustedIssuerDids,
+  allowAnyValidIssuer = false,
+  allowCommunityLabelVerification = false,
   publicDidKey,
   revocations = [],
+  activeLabels = [],
+  trustedLabelerDids,
   checkRemoteRevocation,
   plcDirectoryUrl,
   resolveDidDoc,
@@ -368,10 +459,21 @@ export async function verifyRecordAttestation({
   record: AchievementUnlockRecord | AchievementProgressRecord | LeaderboardScoreRecord | Record<string, unknown>;
   playerDid: string;
   recordUri?: string;
+  recordCid?: string;
   expectedIssuerDid?: string;
+  /** Optional list of additional trusted signer DIDs (e.g. federated tournament hosts or post-EoS revival servers). */
+  trustedIssuerDids?: string[];
+  /** When true, accepts valid cryptographic signatures from any resolvable issuer DID (open federation mode). */
+  allowAnyValidIssuer?: boolean;
+  /** When true, unsigned post-EoS records carrying a `verified-replay` / `community-verified` label from a trusted labeler verify as valid. */
+  allowCommunityLabelVerification?: boolean;
   /** Optional explicit `did:key:z...` override (for unit tests or pre-cached keys). */
   publicDidKey?: string;
   revocations?: Array<RevocationRecord | RevocationWithOrigin>;
+  /** Active ATProto `com.atproto.label.defs#label` entries for anti-cheat & community replay verification. */
+  activeLabels?: AtprotoLabel[];
+  /** Optional allowlist of trusted labeler DIDs. If omitted, all entries in `activeLabels` are trusted. */
+  trustedLabelerDids?: string[];
   /** Optional async O(1) PDS revocation lookup `(issuerDid, attestationCid) => RevocationRecord | null`. */
   checkRemoteRevocation?: (issuerDid: string, attestationCid: string) => Promise<RevocationRecord | null>;
   plcDirectoryUrl?: string;
@@ -387,13 +489,24 @@ export async function verifyRecordAttestation({
     };
   }
 
-  const sigs = rec.signatures as InlineSignature[] | undefined;
-  if (!Array.isArray(sigs) || sigs.length === 0) {
-    return {
-      verified: false,
-      error: 'missing_signatures',
-      message: 'Record contains no inline attestation signatures.',
-    };
+  // Check anti-cheat moderation labels upfront (applies to both signed and unsigned records)
+  if (activeLabels.length > 0) {
+    const blockingLabels = findInvalidatingLabels({
+      recordUri,
+      recordCid,
+      playerDid,
+      activeLabels,
+      trustedLabelerDids,
+    });
+    if (blockingLabels.length > 0) {
+      const summary = blockingLabels.map((l) => `${l.val} (by ${l.src})`).join(', ');
+      return {
+        verified: false,
+        error: 'label_invalidated',
+        message: `Record invalidated by moderation label: ${summary}.`,
+        labels: blockingLabels,
+      };
+    }
   }
 
   const targetUri =
@@ -404,19 +517,89 @@ export async function verifyRecordAttestation({
         : undefined;
   const definitionPublisherDid = expectedIssuerDid ?? extractIssuerFromAtUri(targetUri);
 
+  const allowedIssuers = new Set<string>();
+  if (definitionPublisherDid) allowedIssuers.add(definitionPublisherDid);
+  if (trustedIssuerDids) {
+    for (const d of trustedIssuerDids) {
+      if (d) allowedIssuers.add(d);
+    }
+  }
+
+  const sigs = rec.signatures as InlineSignature[] | undefined;
+  if (!Array.isArray(sigs) || sigs.length === 0) {
+    // Support post-EoS serverless replay verification via trusted ATProto Labelers!
+    if (allowCommunityLabelVerification && activeLabels.length > 0 && recordUri) {
+      const posLabels = findVerificationLabels({
+        recordUri,
+        recordCid,
+        activeLabels,
+        trustedLabelerDids,
+      });
+      if (posLabels.length > 0) {
+        const labelerDid = posLabels[0].src;
+        const unsignedCid = await computeAttestationCid({
+          record: rec,
+          metadata: {
+            $type: `${NSIDS.Defs}#inlineSignature`,
+            key: `label:${labelerDid}`,
+            issuer: labelerDid,
+          },
+          repositoryDid: playerDid,
+        });
+        const attestationCid = unsignedCid.toString();
+
+        // Still honor publisher revocations if any exist
+        const matchingRev = isRecordRevoked({
+          attestationCid,
+          playerDid,
+          record: rec,
+          recordUri,
+          issuerDid: definitionPublisherDid ?? labelerDid,
+          definitionPublisherDid,
+          revocations,
+        });
+        if (matchingRev) {
+          return {
+            verified: false,
+            error: 'revoked',
+            message: `Record was revoked (${matchingRev.reason}).`,
+            issuerDid: labelerDid,
+            attestationCid,
+            revocation: matchingRev,
+          };
+        }
+
+        return {
+          verified: true,
+          verificationMethod: 'community-label',
+          issuerDid: labelerDid,
+          keyId: `label:${labelerDid}#${posLabels[0].val}`,
+          attestationCid,
+        };
+      }
+    }
+
+    return {
+      verified: false,
+      error: 'missing_signatures',
+      message: 'Record contains no inline attestation signatures.',
+    };
+  }
+
   // Pick matching inline signature
   const sig = sigs.find((s) => {
     if (!s || typeof s.key !== 'string') return false;
-    if (!definitionPublisherDid) return true;
+    if (allowAnyValidIssuer || allowedIssuers.size === 0) return true;
     const keyDid = s.key.split('#')[0];
-    return keyDid === definitionPublisherDid || s.issuer === definitionPublisherDid;
+    return allowedIssuers.has(keyDid) || (typeof s.issuer === 'string' && allowedIssuers.has(s.issuer));
   });
 
   if (!sig) {
+    const expectedDesc = [...allowedIssuers].join(', ');
     return {
       verified: false,
       error: 'issuer_mismatch',
-      message: `No signature found from expected game publisher "${definitionPublisherDid}".`,
+      message: `No signature found from trusted authority (${expectedDesc}).`,
       issuerDid: definitionPublisherDid,
     };
   }
@@ -426,11 +609,11 @@ export async function verifyRecordAttestation({
     ? sig.issuer ?? definitionPublisherDid ?? keyDidPart
     : keyDidPart;
 
-  if (definitionPublisherDid && issuerDid !== definitionPublisherDid) {
+  if (!allowAnyValidIssuer && allowedIssuers.size > 0 && !allowedIssuers.has(issuerDid)) {
     return {
       verified: false,
       error: 'issuer_mismatch',
-      message: `Signature issuer "${issuerDid}" does not match definition publisher "${definitionPublisherDid}".`,
+      message: `Signature issuer "${issuerDid}" is not in trusted issuers (${[...allowedIssuers].join(', ')}).`,
       issuerDid,
     };
   }
@@ -441,6 +624,19 @@ export async function verifyRecordAttestation({
       error: 'invalid_key_format',
       message: `Invalid signer key "${sig.key}".`,
     };
+  }
+
+  // Enforce optional `rkey` binding (defeats moving signed records to evade URI-targeted labels)
+  if (typeof sig.rkey === 'string' && recordUri) {
+    const actualRkey = extractRkeyFromAtUri(recordUri);
+    if (actualRkey && actualRkey !== sig.rkey) {
+      return {
+        verified: false,
+        error: 'rkey_mismatch',
+        message: `Signature is bound to rkey "${sig.rkey}", but record was found at rkey "${actualRkey}".`,
+        issuerDid,
+      };
+    }
   }
 
   // Recompute repository-bound attestation CID
@@ -466,12 +662,11 @@ export async function verifyRecordAttestation({
   let resolvedDidKey = publicDidKey;
   if (!resolvedDidKey) {
     if (sig.key.startsWith('did:key:')) {
-      // Only accept bare did:key if no DID-doc publisher was expected (e.g. local dev)
-      if (definitionPublisherDid && !definitionPublisherDid.startsWith('did:key:')) {
+      if (!allowAnyValidIssuer && allowedIssuers.size > 0 && ![...allowedIssuers].some((d) => d.startsWith('did:key:'))) {
         return {
           verified: false,
           error: 'invalid_key_format',
-          message: `Bare did:key cannot attest on behalf of "${definitionPublisherDid}" without DID document verificationMethod binding.`,
+          message: `Bare did:key cannot attest on behalf of "${issuerDid}" without DID document verificationMethod binding.`,
           issuerDid,
           attestationCid,
         };
@@ -542,13 +737,14 @@ export async function verifyRecordAttestation({
     };
   }
 
-  // Check local/indexed revocations
+  // Check local/indexed revocations (honoring both definition owner and signing issuer)
   const matchingRevocation = isRecordRevoked({
     attestationCid,
     playerDid,
     record: rec,
     recordUri,
     issuerDid,
+    definitionPublisherDid,
     revocations,
   });
   if (matchingRevocation) {
@@ -575,10 +771,24 @@ export async function verifyRecordAttestation({
         revocation: remoteRev,
       };
     }
+    if (definitionPublisherDid && definitionPublisherDid !== issuerDid) {
+      const defOwnerRev = await checkRemoteRevocation(definitionPublisherDid, attestationCid);
+      if (defOwnerRev) {
+        return {
+          verified: false,
+          error: 'revoked',
+          message: `Attestation was revoked on game publisher PDS (${defOwnerRev.reason}).`,
+          issuerDid,
+          attestationCid,
+          revocation: defOwnerRev,
+        };
+      }
+    }
   }
 
   return {
     verified: true,
+    verificationMethod: 'attestation',
     issuerDid,
     keyId: sig.key,
     attestationCid,
