@@ -1,0 +1,74 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.revocation",
+  "description": "Published in a game's own repository to revoke compromised, exploited, or mistakenly signed achievement unlocks or leaderboard scores.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Revokes inline cryptographic attestations previously signed by this game publisher. Must be published in the same repository (DID) that owns the referenced `subject` definition. For `scope: \"attestation\"`, set `rkey` to the `attestationCid` so lightweight clients can check revocation in O(1) via `com.atproto.repo.getRecord` and cheaters cannot evade revocation by copying a signed record to a new `rkey`. Deleting this record reinstates the revoked attestation(s).",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["scope", "player", "subject", "reason", "revokedAt"],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["attestation", "achievement", "leaderboard", "game"],
+            "description": "`attestation` revokes a single signed payload identified by `attestationCid`; `achievement`, `leaderboard`, or `game` revokes all signed records for `player` matching `subject` (optionally bounded by `before`)."
+          },
+          "attestationCid": {
+            "type": "string",
+            "format": "cid",
+            "description": "Deterministic DAG-CBOR CIDv1 (`bafy...`) of the signed payload being revoked. Required when `scope` is `attestation`. Binding revocation to `attestationCid` rather than only `recordUri` prevents a player from re-uploading the same signed record under a different `rkey`."
+          },
+          "player": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the player whose signed record(s) are revoked."
+          },
+          "subject": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the `achievement.definition`, `leaderboard.definition`, or `games.atmosphere.define` record in this publisher's repository to which the revocation applies."
+          },
+          "recordUri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the offending `achievement.unlock` or `leaderboard.score` record observed in the player's repository, preserved for auditability."
+          },
+          "before": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional cutoff timestamp for `achievement`, `leaderboard`, or `game` scopes. When set, only records with `unlockedAt` / `recordedAt` at or before `before` are revoked (e.g. invalidating pre-patch exploit runs while allowing fair post-patch play)."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 64,
+            "knownValues": [
+              "cheating",
+              "exploit",
+              "bug",
+              "mistakenGrant",
+              "accountCompromised",
+              "requestedByPlayer",
+              "other"
+            ],
+            "description": "Machine-readable reason code for the revocation."
+          },
+          "note": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Optional human-readable explanation written by the game publisher."
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this revocation was published."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.achievement.definition",
+  "description": "Canonical metadata for a game achievement, published in the game's own AT Protocol repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). Open Gaming intentionally omits global XP/gamerscore values and per-game achievement count caps so achievements are appreciated on a per-game basis without cross-game inflation or clout-chasing.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["game", "title", "description", "icon", "createdAt"],
+        "properties": {
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the game definition record (e.g. `games.atmosphere.define` or `games.gamesgamesgamesgames.game`) in the publisher's repository."
+          },
+          "title": {
+            "type": "string",
+            "maxGraphemes": 100,
+            "maxLength": 300,
+            "description": "Display name of the achievement (e.g. `Sky Surfer`). Can be edited for typos without breaking player unlock references."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 500,
+            "maxLength": 1500,
+            "description": "Concise description of the achievement (earned summary or general explanation)."
+          },
+          "requirement": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Optional imperative prompt shown BEFORE the player unlocks the achievement (e.g. `Clear 50 posts in a single run`), when `description` is written in the past tense (`You cleared 50 posts!`)."
+          },
+          "icon": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 1000000,
+            "description": "Required square icon representing the unlocked achievement (512x512 PNG or WebP with alpha transparency recommended)."
+          },
+          "iconAlt": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Accessibility alt text for the achievement icon."
+          },
+          "lockedIcon": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 1000000,
+            "description": "Optional distinct icon shown while the achievement is locked. If omitted, clients render a dimmed/grayscale treatment or generic lock badge."
+          },
+          "tier": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["bronze", "silver", "gold", "platinum"],
+            "description": "Optional trophy plaque tier indicating author-intended difficulty/prestige."
+          },
+          "hidden": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, clients MUST mask the achievement's title, description, and icon until the viewing player has unlocked it. Note: PDS records are public on the network; avoid placing major plot spoilers in plaintext fields of pre-published records."
+          },
+          "stepsNeeded": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 1000000000,
+            "description": "When present, marks this as an Incremental Achievement requiring `stepsNeeded` cumulative steps to unlock (enabling progress bars like `42 / 100`). Omit for standard single-step achievements."
+          },
+          "group": {
+            "type": "string",
+            "maxGraphemes": 64,
+            "maxLength": 200,
+            "description": "Optional category, DLC pack, or family heading used to group related achievements."
+          },
+          "listOrder": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional sort index controlling the display order of locked achievements for this game."
+          },
+          "badge": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI linking to a corresponding `community.lexicon.badge.definition` record (e.g. for cross-displaying a game's 100% Platinum milestone in general ATProto badge drawers)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this achievement definition was created."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this achievement definition's presentation metadata was last updated."
+          }
+        }
+      }
+    }
+  }
+}

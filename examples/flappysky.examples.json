@@ -1,0 +1,194 @@
+{
+  "$comment": "End-to-end Open Gaming example records grounded in Flappysky (https://flappysky.symmetricalboy.com)",
+  "gameDefinition_onGamePds": {
+    "uri": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+    "value": {
+      "$type": "games.atmosphere.define",
+      "name": "Flappysky",
+      "tagline": "Flutter past skeets and collect likes across the Atmosphere.",
+      "description": "A fast-paced arcade game built to showcase open AT Protocol achievements and leaderboards.",
+      "url": "https://flappysky.symmetricalboy.com",
+      "publisher": "at://did:plc:flappyskygameexample",
+      "category": "browser",
+      "status": "live",
+      "developer": {
+        "name": "symmetricalboy",
+        "did": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "url": "https://symmetricalboy.com"
+      },
+      "uses": [
+        {
+          "role": "other",
+          "nsid": "games.opengaming.achievement.unlock",
+          "rkey": "any",
+          "label": "Achievements",
+          "purpose": "Verified achievements earned in Flappysky."
+        },
+        {
+          "role": "leaderboard",
+          "nsid": "games.opengaming.leaderboard.score",
+          "rkey": "any",
+          "label": "Leaderboards",
+          "purpose": "Verified high scores and collectible runs."
+        }
+      ],
+      "createdAt": "2026-11-07T20:00:00.000Z"
+    }
+  },
+  "achievementDefinitions_onGamePds": [
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/first-flight",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "title": "First Flight",
+        "description": "Cleared your very first post in Flappysky.",
+        "requirement": "Clear 1 post in a single run.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
+          "mimeType": "image/png",
+          "size": 48210
+        },
+        "iconAlt": "A bright blue butterfly soaring over a rounded post.",
+        "tier": "bronze",
+        "hidden": false,
+        "listOrder": 10,
+        "createdAt": "2026-11-07T20:00:00.000Z"
+      }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/banger-collector",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "title": "Banger Collector",
+        "description": "Collected 100 floating heart likes across all runs.",
+        "requirement": "Collect 100 likes cumulatively.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreig7dkulj7gxbtieaphkqdhyyok4egzjqljfxm7z34qoelajngbwqm" },
+          "mimeType": "image/png",
+          "size": 52900
+        },
+        "iconAlt": "A golden heart surrounded by sparkles.",
+        "tier": "silver",
+        "hidden": false,
+        "stepsNeeded": 100,
+        "listOrder": 20,
+        "createdAt": "2026-11-07T20:00:00.000Z"
+      }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/touch-grass",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "title": "Touch Grass",
+        "description": "Crashed straight into the ground without clearing a single post.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreib7ld225myegtu43hwl4fmw3jfwajncfx3uycidwu7u67zu6l2hoa" },
+          "mimeType": "image/png",
+          "size": 41024
+        },
+        "iconAlt": "A dizzy butterfly resting on green grass.",
+        "tier": "bronze",
+        "hidden": true,
+        "listOrder": 90,
+        "createdAt": "2026-11-07T20:00:00.000Z"
+      }
+    }
+  ],
+  "achievementUnlock_onPlayerPds": {
+    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.unlock/flappysky-first-flight",
+    "value": {
+      "$type": "games.opengaming.achievement.unlock",
+      "achievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/first-flight",
+      "definitionCid": "bafyreic7eoftckauk4n5sbsigibgkgabkm2bsyvo5ix6yqnmifemfzdwpi",
+      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+      "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+      "unlockedAt": "2026-11-07T21:15:00.000Z",
+      "signatures": [
+        {
+          "$type": "games.opengaming.defs#inlineSignature",
+          "key": "did:plc:flappyskygameexample#attestations",
+          "issuer": "did:plc:flappyskygameexample",
+          "issuedAt": "2026-11-07T21:15:00.120Z",
+          "cid": "bafyreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori",
+          "signature": {
+            "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+          }
+        }
+      ]
+    }
+  },
+  "leaderboardDefinition_onGamePds": {
+    "uri": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+    "value": {
+      "$type": "games.opengaming.leaderboard.definition",
+      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+      "name": "High Scores",
+      "description": "Combined points from cleared posts and collected heart likes in a single run.",
+      "icon": {
+        "$type": "blob",
+        "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
+        "mimeType": "image/png",
+        "size": 50112
+      },
+      "iconAlt": "A golden arcade crown above blue clouds.",
+      "sortOrder": "largerIsBetter",
+      "scoreFormat": {
+        "kind": "numeric",
+        "decimalPlaces": 0,
+        "unitSingular": "pt",
+        "unitPlural": "pts"
+      },
+      "timeframes": ["daily", "weekly", "allTime"],
+      "recordPolicy": "perWindowBest",
+      "scoreMin": 1,
+      "scoreMax": 9999,
+      "listOrder": 1,
+      "createdAt": "2026-11-07T20:00:00.000Z"
+    }
+  },
+  "leaderboardScore_onPlayerPds": {
+    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.leaderboard.score/3mzrk9abcde2v",
+    "value": {
+      "$type": "games.opengaming.leaderboard.score",
+      "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+      "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+      "score": 42,
+      "displayScore": "42 pts",
+      "tag": "posts:30,likes:12",
+      "recordedAt": "2026-11-07T21:18:30.000Z",
+      "signatures": [
+        {
+          "$type": "games.opengaming.defs#inlineSignature",
+          "key": "did:plc:flappyskygameexample#attestations",
+          "issuer": "did:plc:flappyskygameexample",
+          "issuedAt": "2026-11-07T21:18:30.200Z",
+          "cid": "bafyreig7dkulj7gxbtieaphkqdhyyok4egzjqljfxm7z34qoelajngbwqm",
+          "signature": {
+            "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+          }
+        }
+      ]
+    }
+  },
+  "revocation_onGamePds": {
+    "uri": "at://did:plc:flappyskygameexample/games.opengaming.revocation/bafyreibym4dl6h3luuk5mdlkhznlrzqqc57vdcqwfbe4swkddtmfgxwb34",
+    "value": {
+      "$type": "games.opengaming.revocation",
+      "scope": "attestation",
+      "attestationCid": "bafyreibym4dl6h3luuk5mdlkhznlrzqqc57vdcqwfbe4swkddtmfgxwb34",
+      "player": "did:plc:cheaterexampleaccount0000",
+      "subject": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+      "recordUri": "at://did:plc:cheaterexampleaccount0000/games.opengaming.leaderboard.score/3mzrl2exploit",
+      "reason": "exploit",
+      "note": "Score submitted via pause-frame physics exploit prior to v1.0.1 patch.",
+      "revokedAt": "2026-11-07T22:00:00.000Z"
+    }
+  }
+}

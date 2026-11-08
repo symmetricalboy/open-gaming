@@ -1,0 +1,130 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.leaderboard.getScores",
+  "description": "Query ranked leaderboard entries by timeframe (daily, weekly, all-time) and scope (public vs social follows).",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Returns ranked entries for a `games.opengaming.leaderboard.definition`, filtered by timeframe, cryptographic verification, publisher `games.opengaming.revocation` records, and social graph.",
+      "parameters": {
+        "type": "params",
+        "required": ["leaderboard"],
+        "properties": {
+          "leaderboard": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the `games.opengaming.leaderboard.definition`."
+          },
+          "timeframe": {
+            "type": "string",
+            "knownValues": ["allTime", "weekly", "daily"],
+            "default": "allTime",
+            "description": "Time window derived from `recordedAt` (must be one of the definition's `timeframes`)."
+          },
+          "scope": {
+            "type": "string",
+            "knownValues": ["public", "social"],
+            "default": "public",
+            "description": "`public` returns global scores; `social` filters to `viewer` and accounts `viewer` follows (`app.bsky.graph.follow`)."
+          },
+          "viewer": {
+            "type": "string",
+            "format": "did",
+            "description": "Optional viewer DID used to compute `social` scope and return `viewerEntry`."
+          },
+          "verifiedOnly": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, excludes unsigned, invalidly signed, or publisher-revoked (`games.opengaming.revocation`) score records."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["leaderboard", "entries"],
+          "properties": {
+            "leaderboard": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#scoreEntry"
+              }
+            },
+            "viewerEntry": {
+              "type": "ref",
+              "ref": "#scoreEntry",
+              "description": "The `viewer`'s own best non-revoked entry in the requested timeframe, if any."
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "scoreEntry": {
+      "type": "object",
+      "required": ["rank", "player", "uri", "score", "recordedAt", "verified"],
+      "properties": {
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "player": {
+          "type": "string",
+          "format": "did"
+        },
+        "handle": {
+          "type": "string",
+          "format": "handle"
+        },
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the underlying `games.opengaming.leaderboard.score` record."
+        },
+        "attestationCid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Computed repository-bound attestation CIDv1 of the score record."
+        },
+        "score": {
+          "type": "integer"
+        },
+        "displayScore": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "True if inline signature verification against the publisher's `#attestations` DID key succeeded AND no matching `games.opengaming.revocation` exists."
+        },
+        "revoked": {
+          "type": "boolean",
+          "description": "True if revoked by a `games.opengaming.revocation` record in the publisher's repository (only returned when `verifiedOnly` is false)."
+        }
+      }
+    }
+  }
+}

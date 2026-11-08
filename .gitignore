@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+*.key
+*.pem
+.DS_Store
+coverage/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+apps/web/data/

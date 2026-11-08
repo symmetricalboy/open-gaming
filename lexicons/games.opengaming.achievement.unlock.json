@@ -1,0 +1,60 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.achievement.unlock",
+  "description": "A signed receipt stored in a player's repository confirming they unlocked a game achievement.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Published in the player's own PDS when an achievement is earned. Display metadata lives on the game's `achievement.definition` record; legitimacy is proven via inline CID-first cryptographic `signatures` from the game publisher's `#attestations` DID key (and subject to `games.opengaming.revocation` records in the game's PDS).",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["achievement", "unlockedAt"],
+        "properties": {
+          "achievement": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the `games.opengaming.achievement.definition` record in the game publisher's repository."
+          },
+          "definitionCid": {
+            "type": "string",
+            "format": "cid",
+            "description": "Optional CID snapshot of the `achievement.definition` record at the moment of unlock. Kept optional and decoupled from `achievement` so cosmetic/typo edits to the definition never orphan player unlocks."
+          },
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the game definition (`games.atmosphere.define`), included so indexers can group unlocks by game without an extra lookup."
+          },
+          "player": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the player who earned this achievement (must match the repository DID housing this record)."
+          },
+          "unlockedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the achievement was earned."
+          },
+          "stepsCompleted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional final step count reached when unlocking an incremental achievement."
+          },
+          "signatures": {
+            "type": "array",
+            "maxLength": 8,
+            "description": "Inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`) signed by the game publisher's `#attestations` DID key over the repository-bound DAG-CBOR CID of this record. Unsigned records MUST be treated as unverified/self-reported, and records matching a publisher `games.opengaming.revocation` MUST be treated as revoked.",
+            "items": {
+              "type": "union",
+              "refs": [
+                "games.opengaming.defs#inlineSignature"
+              ],
+              "closed": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

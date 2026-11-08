@@ -1,0 +1,22 @@
+{
+  "name": "open-gaming-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open Gaming ATProto Lexicons, SDK, CLI, and Viewer App (games.opengaming.* -> games.atmosphere.*)",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm --workspace @opengaming/web run dev",
+    "start": "npm --workspace @opengaming/web run start",
+    "test": "npm run test --workspaces --if-present",
+    "validate": "npm --workspace @opengaming/sdk run validate"
+  },
+  "license": "CC0-1.0"
+}

@@ -1,0 +1,16 @@
+export const OPENGAMING_NAMESPACE = 'games.opengaming' as const;
+export const ATMOSPHERE_NAMESPACE = 'games.atmosphere' as const;
+
+export const NSIDS = {
+  Defs: 'games.opengaming.defs',
+  AchievementDefinition: 'games.opengaming.achievement.definition',
+  AchievementUnlock: 'games.opengaming.achievement.unlock',
+  AchievementProgress: 'games.opengaming.achievement.progress',
+  LeaderboardDefinition: 'games.opengaming.leaderboard.definition',
+  LeaderboardScore: 'games.opengaming.leaderboard.score',
+  LeaderboardGetScores: 'games.opengaming.leaderboard.getScores',
+  ActorGetProfile: 'games.opengaming.actor.getProfile',
+  Revocation: 'games.opengaming.revocation',
+} as const;
+
+export const ATTESTATION_KEY_FRAGMENT = '#attestations' as const;

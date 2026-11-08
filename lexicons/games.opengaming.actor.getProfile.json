@@ -1,0 +1,110 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.actor.getProfile",
+  "description": "Query an AT Protocol player's per-game achievement progress, completion showcase, and verified trophy breakdown.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Returns a player's Gamercard summary centered on per-game achievement appreciation and completion (with no global XP/gamerscore system or per-game achievement count cap), excluding unverified or publisher-revoked (`games.opengaming.revocation`) unlocks.",
+      "parameters": {
+        "type": "params",
+        "required": ["actor"],
+        "properties": {
+          "actor": {
+            "type": "string",
+            "format": "at-identifier",
+            "description": "Handle or DID of the player."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["did", "gamesPlayed", "completedGames", "totalUnlocks", "tiers", "games"],
+          "properties": {
+            "did": {
+              "type": "string",
+              "format": "did"
+            },
+            "handle": {
+              "type": "string",
+              "format": "handle"
+            },
+            "gamesPlayed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of distinct games in which the player has earned at least one verified achievement."
+            },
+            "completedGames": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of games in which the player has unlocked 100% of published achievements."
+            },
+            "totalUnlocks": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total verified, non-revoked achievements unlocked across all games."
+            },
+            "tiers": {
+              "type": "ref",
+              "ref": "#tierCounts"
+            },
+            "games": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#gameSummary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tierCounts": {
+      "type": "object",
+      "required": ["platinum", "gold", "silver", "bronze", "untiered"],
+      "properties": {
+        "platinum": { "type": "integer", "minimum": 0 },
+        "gold": { "type": "integer", "minimum": 0 },
+        "silver": { "type": "integer", "minimum": 0 },
+        "bronze": { "type": "integer", "minimum": 0 },
+        "untiered": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gameSummary": {
+      "type": "object",
+      "required": ["game", "unlockedCount", "totalAchievements", "completionPercent", "completed"],
+      "properties": {
+        "game": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "unlockedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalAchievements": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total achievements defined by this game (uncapped)."
+        },
+        "completionPercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Floored integer completion percentage (`0..100`), reaching `100` strictly when `unlockedCount == totalAchievements`."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "True when the game defines at least one achievement and the player has unlocked all of them."
+        },
+        "latestUnlockAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Timestamp of the player's most recent verified achievement unlock in this game."
+        }
+      }
+    }
+  }
+}

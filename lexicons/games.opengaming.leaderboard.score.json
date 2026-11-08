@@ -1,0 +1,70 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.leaderboard.score",
+  "description": "A signed leaderboard score entry stored in a player's repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Published in the player's PDS when recording a score for a `games.opengaming.leaderboard.definition` according to its `recordPolicy` (`bestOnly`, `perWindowBest`, or `everyRun`). Legitimacy is proven via inline CID-first cryptographic `signatures` from the game publisher's `#attestations` DID key (and subject to `games.opengaming.revocation` records in the game's PDS).",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["leaderboard", "score", "recordedAt"],
+        "properties": {
+          "leaderboard": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the `games.opengaming.leaderboard.definition` record in the game publisher's repository."
+          },
+          "definitionCid": {
+            "type": "string",
+            "format": "cid",
+            "description": "Optional CID snapshot of the `leaderboard.definition` record when the score was set."
+          },
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the game definition (`games.atmosphere.define`)."
+          },
+          "player": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the player who achieved this score (must match the repository DID housing this record)."
+          },
+          "score": {
+            "type": "integer",
+            "description": "Raw integer score value (e.g. points, milliseconds, or fixed-decimal integer per `leaderboard.definition#scoreFormat`)."
+          },
+          "displayScore": {
+            "type": "string",
+            "maxGraphemes": 64,
+            "maxLength": 128,
+            "description": "Optional pre-formatted fallback display string (e.g. `42 pts`, `1:06.03`) for lightweight feed viewers."
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional short metadata tag attached to the run (modeled on Play Games Services `scoreTag`, e.g. character/seed/breakdown like `posts:30,likes:12`)."
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the score was achieved."
+          },
+          "signatures": {
+            "type": "array",
+            "maxLength": 8,
+            "description": "Inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`) signed by the game publisher's `#attestations` DID key over the repository-bound DAG-CBOR CID of this record. Public leaderboards SHOULD default to verified, non-revoked entries.",
+            "items": {
+              "type": "union",
+              "refs": [
+                "games.opengaming.defs#inlineSignature"
+              ],
+              "closed": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

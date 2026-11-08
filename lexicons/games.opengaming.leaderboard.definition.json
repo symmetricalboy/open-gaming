@@ -1,0 +1,98 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.leaderboard.definition",
+  "description": "Canonical metadata for a game leaderboard, published in the game's own AT Protocol repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Defines one leaderboard offered by a game (modeled on Google Play Games Services leaderboards and symmetrical with `games.opengaming.achievement.definition`). Publish in the game publisher's repository using a stable slug rkey (e.g. `high-score`, `most-likes`).",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["game", "name", "icon", "sortOrder", "scoreFormat", "timeframes", "recordPolicy", "createdAt"],
+        "properties": {
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the game definition record (e.g. `games.atmosphere.define`) in the publisher's repository."
+          },
+          "name": {
+            "type": "string",
+            "maxGraphemes": 100,
+            "maxLength": 300,
+            "description": "Display name of the leaderboard (e.g. `High Scores`, `Fastest Clear`)."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 500,
+            "maxLength": 1500,
+            "description": "Optional explanation of what this leaderboard tracks and any rules."
+          },
+          "icon": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 1000000,
+            "description": "Required square icon representing this leaderboard (512x512 PNG or WebP recommended; avoid localized text inside the image)."
+          },
+          "iconAlt": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Accessibility alt text for the leaderboard icon."
+          },
+          "sortOrder": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["largerIsBetter", "smallerIsBetter"],
+            "description": "Ranking direction. `largerIsBetter` for points/collectibles; `smallerIsBetter` for speedruns/elapsed time. Once published, `sortOrder` SHOULD NOT be changed."
+          },
+          "scoreFormat": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#scoreFormat",
+            "description": "How raw integer score values are formatted (`numeric`, `time`, or `currency`)."
+          },
+          "timeframes": {
+            "type": "array",
+            "minLength": 1,
+            "maxLength": 3,
+            "description": "Which leaderboard time windows this game tracks and displays for this board (e.g. `[\"allTime\"]` for a single permanent board, or `[\"daily\", \"weekly\", \"allTime\"]` for rotating + historical boards).",
+            "items": {
+              "type": "string",
+              "maxLength": 32,
+              "knownValues": ["daily", "weekly", "allTime"]
+            }
+          },
+          "recordPolicy": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["bestOnly", "perWindowBest", "everyRun"],
+            "description": "Controls how player `leaderboard.score` records are written for this board: `bestOnly` overwrites a single personal-best record per player (ideal when `timeframes` is `[\"allTime\"]`); `perWindowBest` appends a timestamped record whenever beating the player's active Daily, Weekly, or All-Time best; `everyRun` appends a record for every completed run."
+          },
+          "scoreMin": {
+            "type": "integer",
+            "description": "Optional minimum valid raw score. Indexers and AppViews MUST discard score submissions below `scoreMin`."
+          },
+          "scoreMax": {
+            "type": "integer",
+            "description": "Optional maximum valid raw score. Indexers and AppViews MUST discard clearly fraudulent submissions above `scoreMax`."
+          },
+          "listOrder": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional sort index controlling the display order among a game's leaderboards."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this leaderboard definition was created."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this leaderboard definition was last updated."
+          }
+        }
+      }
+    }
+  }
+}

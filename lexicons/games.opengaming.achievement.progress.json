@@ -1,0 +1,55 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.achievement.progress",
+  "description": "Incremental progress toward a multi-step achievement, stored in the player's repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Tracks partial progress (e.g. `42 / 100`) toward an incremental `games.opengaming.achievement.definition` before it is unlocked. Update in place using a deterministic rkey per achievement to avoid repository churn.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["achievement", "currentSteps", "updatedAt"],
+        "properties": {
+          "achievement": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the incremental `games.opengaming.achievement.definition` record."
+          },
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the game definition."
+          },
+          "currentSteps": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current cumulative steps completed toward `stepsNeeded`."
+          },
+          "stepsNeeded": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Optional snapshot of target `stepsNeeded` from the definition for single-read progress bar rendering."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when progress was last synced."
+          },
+          "signatures": {
+            "type": "array",
+            "maxLength": 8,
+            "description": "Optional inline publisher attestation (`games.opengaming.defs#inlineSignature`) over current progress.",
+            "items": {
+              "type": "union",
+              "refs": [
+                "games.opengaming.defs#inlineSignature"
+              ],
+              "closed": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

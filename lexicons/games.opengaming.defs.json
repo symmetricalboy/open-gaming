@@ -1,0 +1,83 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.defs",
+  "description": "Shared type definitions for Open Gaming achievements and leaderboards.",
+  "defs": {
+    "inlineSignature": {
+      "type": "object",
+      "description": "An inline CID-first cryptographic attestation (compatible with the badge.blue / atproto-attestation specification). Computed over the DAG-CBOR CIDv1 of the parent record with `signatures` stripped and `$sig` injected containing `repository: <playerDid>`.",
+      "required": ["key", "signature"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Verification method URI or DID key used to sign the attestation CID (e.g. `did:plc:gamepublisher#attestations` or `did:key:z...`)."
+        },
+        "signature": {
+          "type": "bytes",
+          "maxLength": 512,
+          "description": "Normalized low-S ECDSA signature bytes over the repository-bound attestation CIDv1 bytes."
+        },
+        "issuer": {
+          "type": "string",
+          "format": "did",
+          "description": "Optional DID of the game publisher or authority issuing the attestation."
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Optional timestamp when the signature was generated."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Optional explicit copy of the computed attestation CIDv1 (`bafy...`) that was signed."
+        }
+      }
+    },
+    "scoreFormat": {
+      "type": "object",
+      "description": "Formatting rules for integer leaderboard scores (modeled on Google Play Games Services score formatting, compatible with ATProto's integer-only data model).",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["numeric", "time", "currency"],
+          "description": "How raw integer scores should be interpreted for display."
+        },
+        "decimalPlaces": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 0,
+          "description": "Fixed decimal point offset for `numeric` or `currency` scores. For example, raw integer `314159` with `decimalPlaces: 2` displays as `3,141.59`."
+        },
+        "timeUnit": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["milliseconds", "seconds"],
+          "default": "milliseconds",
+          "description": "Base integer unit for `time` leaderboards. For example, `66032` with `milliseconds` displays as `1:06.03`."
+        },
+        "currencyCode": {
+          "type": "string",
+          "maxLength": 3,
+          "description": "ISO 4217 3-letter currency code (e.g. `USD`) when `kind` is `currency`. Following Play Games Services, micro-units (`decimalPlaces: 6`) or cents (`decimalPlaces: 2`) may be used."
+        },
+        "unitSingular": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128,
+          "description": "Optional custom singular unit label for `numeric` scores (e.g. `meter`, `pipe`, `like`, `pt`)."
+        },
+        "unitPlural": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128,
+          "description": "Optional custom plural unit label for `numeric` scores (e.g. `meters`, `pipes`, `likes`, `pts`)."
+        }
+      }
+    }
+  }
+}
