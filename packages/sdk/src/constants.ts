@@ -10,6 +10,8 @@ export const NSIDS = {
   LeaderboardScore: 'games.opengaming.leaderboard.score',
   LeaderboardGetScores: 'games.opengaming.leaderboard.getScores',
   ActorGetProfile: 'games.opengaming.actor.getProfile',
+  MatchResult: 'games.opengaming.match.result',
+  ChallengeDefinition: 'games.opengaming.challenge.definition',
   Revocation: 'games.opengaming.revocation',
 } as const;
 

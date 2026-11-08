@@ -190,7 +190,11 @@ export async function createAppViewServer(options?: {
         const timeframe = (url.searchParams.get('timeframe') ?? 'allTime') as Timeframe;
         const scope = (url.searchParams.get('scope') ?? 'public') as 'public' | 'social';
         const viewer = url.searchParams.get('viewer')?.trim() || undefined;
+        const player = url.searchParams.get('player')?.trim() || undefined;
+        const includeObsolete = url.searchParams.get('includeObsolete') === 'true';
         const sortBy = url.searchParams.get('sortBy')?.trim() || undefined;
+        const dimensions = url.searchParams.get('dimensions')?.trim() || undefined;
+        const seed = url.searchParams.get('seed')?.trim() || undefined;
         const version = url.searchParams.get('version')?.trim() || undefined;
         const verifiedOnlyParam = url.searchParams.get('verifiedOnly');
         const verifiedOnly = verifiedOnlyParam === null ? true : verifiedOnlyParam !== 'false';
@@ -202,7 +206,11 @@ export async function createAppViewServer(options?: {
           timeframe,
           scope,
           viewer,
+          player,
+          includeObsolete,
           sortBy,
+          dimensions,
+          seed,
           version,
           verifiedOnly,
           limit,
@@ -248,7 +256,11 @@ export async function createAppViewServer(options?: {
         const timeframe = (url.searchParams.get('timeframe') ?? 'allTime') as Timeframe;
         const scope = (url.searchParams.get('scope') ?? 'public') as 'public' | 'social';
         const viewer = url.searchParams.get('viewer')?.trim() || undefined;
+        const player = url.searchParams.get('player')?.trim() || undefined;
+        const includeObsolete = url.searchParams.get('includeObsolete') === 'true';
         const sortBy = url.searchParams.get('sortBy')?.trim() || undefined;
+        const dimensions = url.searchParams.get('dimensions')?.trim() || undefined;
+        const seed = url.searchParams.get('seed')?.trim() || undefined;
         const version = url.searchParams.get('version')?.trim() || undefined;
         const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50;
 
@@ -260,7 +272,11 @@ export async function createAppViewServer(options?: {
             timeframe,
             scope,
             viewer,
+            player,
+            includeObsolete,
             sortBy,
+            dimensions,
+            seed,
             version,
             limit,
           })
@@ -356,7 +372,7 @@ export async function createAppViewServer(options?: {
         }
 
         const arrBuf = await upstream.arrayBuffer();
-        if (arrBuf.byteLength > 1_500_000) {
+        if (arrBuf.byteLength > 2_100_000) {
           res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end('Blob exceeds size limit');
           return;

@@ -16,6 +16,7 @@ import {
   createSignedUnlock,
   verifyRecordAttestation,
 } from './attestation.js';
+import { verifyMatchResult } from './matches.js';
 import { resolveActiveLabels } from './labels.js';
 import {
   createRevocationRecord,
@@ -23,17 +24,22 @@ import {
   reinstateRevocation,
 } from './revocation.js';
 import {
+  parseDimensionsFilter,
   validateComponentDefs,
+  validateDimensionDefs,
   validateScoreComponents,
+  validateScoreDimensions,
 } from './leaderboards.js';
 import { NSIDS } from './constants.js';
 import type {
   AtprotoLabel,
   LeaderboardDefinitionRecord,
+  MatchResultRecord,
   RevocationReason,
   RevocationRecord,
   RevocationScope,
   ScoreComponentValMap,
+  StringMap,
 } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,7 +58,7 @@ Commands:
   validate               Validate Lexicon schemas and example records
   sign-unlock            Create & inline-sign an achievement.unlock record
   sign-score             Create & inline-sign a leaderboard.score record (single or multi-component)
-  verify                 Verify a record (inline attestations, multi-issuer, revocations, & ATProto labels)
+  verify                 Verify a record (inline attestations, P2P match co-signing, revocations, & labels)
   revoke                 Create (and optionally publish) a games.opengaming.revocation record
   unrevoke               Delete a revocation record from the game publisher's PDS
 
@@ -200,17 +206,29 @@ async function main(): Promise<void> {
             if (defErr) {
               throw new Error(`${rec.label}: ${defErr}`);
             }
+            const dimErr = validateDimensionDefs(def.dimensions, def.dimensionOrder);
+            if (dimErr) {
+              throw new Error(`${rec.label}: ${dimErr}`);
+            }
             defByUri.set(rec.label, def);
           }
         }
         for (const rec of recordsToCheck) {
           if (rec.nsid === NSIDS.LeaderboardScore) {
-            const scoreRec = rec.value as { leaderboard?: string; components?: ScoreComponentValMap };
+            const scoreRec = rec.value as {
+              leaderboard?: string;
+              components?: ScoreComponentValMap;
+              dimensions?: StringMap;
+            };
             const def = scoreRec.leaderboard ? defByUri.get(scoreRec.leaderboard) : undefined;
             if (def) {
               const compErr = validateScoreComponents(scoreRec.components, def);
               if (compErr) {
                 throw new Error(`${rec.label}: ${compErr}`);
+              }
+              const dimErr = validateScoreDimensions(scoreRec.dimensions, def);
+              if (dimErr) {
+                throw new Error(`${rec.label}: ${dimErr}`);
               }
             }
           }
@@ -229,6 +247,8 @@ async function main(): Promise<void> {
           issuer: { type: 'string' },
           game: { type: 'string' },
           rkey: { type: 'string' },
+          note: { type: 'string' },
+          'run-id': { type: 'string' },
           'private-key': { type: 'string' },
         },
       });
@@ -245,6 +265,8 @@ async function main(): Promise<void> {
         issuerDid: values.issuer,
         game: values.game,
         rkey: values.rkey,
+        note: values.note,
+        runId: values['run-id'],
         signingKey,
       });
       console.log(JSON.stringify(result, null, 2));
@@ -258,6 +280,9 @@ async function main(): Promise<void> {
           leaderboard: { type: 'string' },
           score: { type: 'string' },
           components: { type: 'string' },
+          dimensions: { type: 'string' },
+          seed: { type: 'string' },
+          'run-id': { type: 'string' },
           version: { type: 'string' },
           rkey: { type: 'string' },
           player: { type: 'string' },
@@ -286,11 +311,17 @@ async function main(): Promise<void> {
         }
         parsedComponents = rawComp as ScoreComponentValMap;
       }
+      const parsedDimensions = values.dimensions
+        ? parseDimensionsFilter(values.dimensions)
+        : undefined;
       const signingKey = await loadSigningKey(priv);
       const result = await createSignedScore({
         leaderboard: values.leaderboard,
         score: parsedScore,
         components: parsedComponents,
+        dimensions: parsedDimensions && Object.keys(parsedDimensions).length > 0 ? parsedDimensions : undefined,
+        seed: values.seed,
+        runId: values['run-id'],
         version: values.version,
         rkey: values.rkey,
         playerDid: values.player,
@@ -348,18 +379,31 @@ async function main(): Promise<void> {
             .filter(Boolean)
         : undefined;
 
-      const verification = await verifyRecordAttestation({
-        record,
-        playerDid: values.player,
-        recordUri,
-        expectedIssuerDid: values.issuer,
-        trustedIssuerDids,
-        allowAnyValidIssuer: values['allow-any-issuer'],
-        allowCommunityLabelVerification: values['allow-community-labels'],
-        publicDidKey: values['public-key'],
-        revocations,
-        activeLabels,
-      });
+      const verification =
+        record?.$type === NSIDS.MatchResult
+          ? await verifyMatchResult({
+              record: record as MatchResultRecord,
+              repositoryDid: values.player,
+              recordUri,
+              expectedIssuerDid: values.issuer,
+              trustedIssuerDids,
+              allowAnyValidIssuer: values['allow-any-issuer'],
+              allowCommunityLabelVerification: values['allow-community-labels'],
+              revocations,
+              activeLabels,
+            })
+          : await verifyRecordAttestation({
+              record,
+              playerDid: values.player,
+              recordUri,
+              expectedIssuerDid: values.issuer,
+              trustedIssuerDids,
+              allowAnyValidIssuer: values['allow-any-issuer'],
+              allowCommunityLabelVerification: values['allow-community-labels'],
+              publicDidKey: values['public-key'],
+              revocations,
+              activeLabels,
+            });
       console.log(JSON.stringify(verification, null, 2));
       if (!verification.verified) {
         process.exitCode = 1;

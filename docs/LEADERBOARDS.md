@@ -1,72 +1,69 @@
 # Leaderboards Specification
 
 Schemas:
-- [`games.opengaming.defs`](../lexicons/games.opengaming.defs.json) (Shared Components & Breakdowns)
-- [`games.opengaming.leaderboard.definition`](../lexicons/games.opengaming.leaderboard.definition.json) (Game PDS)
-- [`games.opengaming.leaderboard.score`](../lexicons/games.opengaming.leaderboard.score.json) (Player PDS)
+- [`games.opengaming.leaderboard.definition`](../lexicons/games.opengaming.leaderboard.definition.json) (Game PDS — includes local `#points`, `#percentage`, `#time`, `#enum`, `#text`, `#componentMap`, `#dimensionMap`)
+- [`games.opengaming.leaderboard.score`](../lexicons/games.opengaming.leaderboard.score.json) (Player PDS — includes local `#points`, `#percentage`, `#time`, `#enum`, `#text`, `#componentMap`)
 - [`games.opengaming.leaderboard.getScores`](../lexicons/games.opengaming.leaderboard.getScores.json) (AppView XRPC Query)
+- [`games.opengaming.defs`](../lexicons/games.opengaming.defs.json) (Shared `#scoreFormat`, `#participant`, `#optionItem`, `#stringMap`, `#judgmentBreakdown`)
 
 ---
 
 ## 1. Leaderboard Definitions (`games.opengaming.leaderboard.definition`)
 
-Published in the game publisher's PDS (`key: "any"`, e.g. `high-score`, `rhythm-stage-1`). Open Gaming supports both **classic single-integer leaderboards** and **multi-component leaderboards** (e.g. rhythm games, action stages with points + clear time + rank lamp) with 100% strict ATProto Lexicon v1 compliance.
+Published in the game publisher's PDS (`key: "any"`, e.g. `high-score`, `rhythm-stage-1`). Supports **single-integer leaderboards**, **multi-component leaderboards**, **parameterized sub-board dimensions**, **speedrun PB history**, **co-op squads**, and **latest-rating ladders**.
 
-### Core Fields
-- `game` (`at-uri`): Link to the game's `games.atmosphere.define` record.
-- `name` (`string`, <= 100 graphemes): Display name of the leaderboard or chart.
-- `icon` (`blob`, <= 1 MB): Required square icon (512x512 PNG/WebP recommended).
-- `timeframes` (`array` of `"daily" | "weekly" | "allTime"`, 1–3 entries): Developer-selected timeframes displayed for this leaderboard.
-- `recordPolicy`:
-  - `"bestOnly"`: Maintains a single overwritten Personal Best record per player (`rkey = getBestOnlyScoreRkey(leaderboardUri)`).
-  - `"perWindowBest"`: Appends a new timestamped record whenever a run beats the player's active Daily, Weekly, or All-Time personal best.
-  - `"everyRun"`: Appends a timestamped record for every completed run.
-- `createdAt` (`datetime`).
+### Core Fields, Storage Policy (`recordPolicy`), `timeframes` & `rankingMode`
+Open Gaming cleanly separates PDS write retention (`recordPolicy`), query windows (`timeframes`), and competitor aggregation (`rankingMode`):
+
+- `recordPolicy` (what records the client writes to the player's PDS):
+  - `"overwriteBest"` *(legacy alias `"bestOnly"`)*: Single overwritten PB record per player (`rkey = getBestOnlyScoreRkey(leaderboardUri)`). Minimal storage; zero obsolete history.
+  - `"personalBests"` *(speedrun.com model)*: Appends a new timestamped record (`createRecord`) **every time the player beats their all-time PB** (within the same `dimensions`), preserving their historical PB progression curve without flooding the PDS on failed runs!
+  - `"perWindowBest"`: Appends a new timestamped record whenever a run beats the player's active `daily`, `weekly`, `monthly`, or `allTime` PB.
+  - `"everyRun"`: Appends a timestamped record for every completed run or match rating update.
+- `timeframes` (`array` of `"daily" | "weekly" | "monthly" | "allTime"`, 1–4 entries): Active query windows exposed for this leaderboard.
+- `rankingMode` (`"best" | "latest"`, default `"best"`):
+  - `"best"`: Ranks each competitor by their best non-revoked score inside the requested timeframe/filter, marking older runs as `obsolete: true`.
+  - `"latest"`: Ranks each competitor by their **most recent** (`recordedAt`) verified score — essential for Elo/Glicko/MMR ladders where ratings move both up and down!
+- `startsAt` / `endsAt` (`datetime`): Optional bounded contest/game-jam/season timestamps enforced by `@opengaming/sdk` and AppViews (`isWithinLeaderboardWindow`).
 
 ### Option A: Single-Integer Score Format (`scoreFormat` + `sortOrder`)
-For classic arcade, distance, or speedrun boards with a single primary metric:
 - `sortOrder`: `"largerIsBetter"` or `"smallerIsBetter"`.
 - `scoreFormat` (`games.opengaming.defs#scoreFormat`):
-  - `kind: "numeric"`: Optional `decimalPlaces` (`0..6`) and `unitSingular` / `unitPlural` (e.g. `42 pts`, `3,141.59 meters`).
+  - `kind: "numeric"`: Optional `decimalPlaces` (`0..6`), `unitSingular` / `unitPlural`, and `signedPrefix: boolean` (formats `+3`, `-12`, `0` for golf to-par boards and rating deltas).
   - `kind: "time"`: `timeUnit: "milliseconds" | "seconds"` (e.g. `66032` ms -> `1:06.03`).
-  - `kind: "currency"`: `currencyCode` (ISO 4217, e.g. `USD`) + `decimalPlaces` (e.g. `19950000` with `decimalPlaces: 6` -> `\$19.95`).
-- `scoreMin` / `scoreMax` (`integer`): Sanity bounds enforced by `@opengaming/sdk` and AppViews.
+  - `kind: "currency"`: `currencyCode` (ISO 4217, e.g. `USD`) + `decimalPlaces`.
 
-### Option B: Forward-Compatible Multi-Component Maps (`components` + `componentOrder` + `defaultComponent`)
-Multi-factor leaderboards define `components` (`games.opengaming.defs#scoreComponentDefMap`) as a dictionary object keyed by component key (`format: "record-key"`, 1..32 chars, e.g. `"ex-score"`, `"accuracy"`, `"clear-time"`, `"lamp"`):
+### Option B: Local Multi-Component Maps (`components` + `componentOrder` + `defaultComponent`)
+Component definitions live **locally** inside `games.opengaming.leaderboard.definition` (`#componentMap`) and values live **locally** inside `games.opengaming.leaderboard.score` (`#componentMap`), giving clean, symmetric `$type` names while remaining 100% forward-compatible with the proposed Lexicon `map` type:
 
-- **Zero-Migration Path to Lexicon `map`**: Following the community `$keyFormat` / `$valueType` convention (aligned with Tsunagite and bnewbold's [*Expanding the Lexicon Language*](https://bnewbold.leaflet.pub/3mimokt4o5c2f) proposal), `#scoreComponentDefMap`, `#scoreComponentValMap`, and `#judgmentMap` validate cleanly under `@atproto/lexicon` v1 today (because neither optional placeholder property is required and Lexicon `object` ignores extra keys). When `type: "map"` ships upstream, only the Lexicon schema updates—existing PDS records and **DAG-CBOR `attestationCid` signatures** remain 100% unchanged!
-- **Explicit `componentOrder` (`string[]`)**: Because ATProto PDS repositories store records in DAG-CBOR (which canonically sorts map keys by UTF-8 byte length first, then lexicographically), `componentOrder` preserves the game author's intended column order (`["ex-score", "accuracy", "lamp", "clear-time"]`) across PDS round-trips.
-- **Supported Component Definitions**:
-  - `games.opengaming.defs#pointsComponentDef`: Integer points (`name`, `minimum`, `maximum`, `sortOrder`, `unitSingular`/`unitPlural`).
-  - `games.opengaming.defs#percentageComponentDef`: Fixed-point integer scaled by `10^precision` (e.g. `9942` with `precision: 2` -> `99.42%`), avoiding ATProto float restrictions and SQLite string-sort pitfalls.
-  - `games.opengaming.defs#timeComponentDef`: Elapsed time in `milliseconds` or `seconds` (defaults to `smallerIsBetter`).
-  - `games.opengaming.defs#enumComponentDef`: Ordered enum (`values: [{ id, name }]`) for clear lamps / letter grades (`All Perfect > Full Combo > Clear`).
-  - `games.opengaming.defs#textComponentDef`: Short display metadata (`maxGraphemes`, non-sortable).
+- `games.opengaming.leaderboard.definition#points` <-> `games.opengaming.leaderboard.score#points`
+- `games.opengaming.leaderboard.definition#percentage` <-> `games.opengaming.leaderboard.score#percentage` (fixed-point integer scaled by `10^precision`, e.g. `9942` -> `99.42%`)
+- `games.opengaming.leaderboard.definition#time` <-> `games.opengaming.leaderboard.score#time`
+- `games.opengaming.leaderboard.definition#enum` <-> `games.opengaming.leaderboard.score#enum` (`values: [{ id, name }]`)
+- `games.opengaming.leaderboard.definition#text` <-> `games.opengaming.leaderboard.score#text` (display metadata, non-sortable)
 
-`defaultComponent` identifies the primary ranking key when `leaderboard.getScores` is called without `?sortBy=<component-key>`.
-
-### Legal Chart / Map / Patch Hashes (`rankedVersions`) & Multi-Issuer (`trustedIssuers`)
-- `rankedVersions` (`string[]`): Optional allowlist of legal chart, map, or game-build hashes (e.g. `["md5:8a4f2c...", "sha256:e3b0c4..."]`). When non-empty, `getScores` filters active rankings to scores whose `version` is in `rankedVersions` (unless a caller queries a specific historical `?version=`), keeping pre-patch scores intact and non-revoked in players' PDSs!
-- `trustedIssuers` (`did[]`): Additional federated or community revival server DIDs authorized to sign scores for this leaderboard.
+### Parameterized Sub-Board Dimensions (`dimensions` + `dimensionOrder`)
+Instead of publishing $N \times M$ separate leaderboard definitions for every character, difficulty, keymode (`4K`/`7K`), or party size (`solo`/`duo`), a single `leaderboard.definition` can declare `dimensions` (`#dimensionMap`):
+- Each dimension defines `name`, allowed `values` (`games.opengaming.defs#optionItem[]`), optional `required`, `allowCustomValues`, and `defaultValue`.
+- Scores attach `dimensions` (`games.opengaming.defs#stringMap`, e.g. `{ "mode": "4k", "scroll": "upscroll" }`), validated at index time and filterable via `?dimensions=mode=4k,scroll=upscroll`.
 
 ---
 
-## 2. Player Score Records, Genre `details` & Replay Blobs (`games.opengaming.leaderboard.score`)
+## 2. Co-op Squads (`participants` + `runId`), Seeds, Versions & Replays (`games.opengaming.leaderboard.score`)
 
-- **Core & Multi-Component Values**: Stores `leaderboard` (`at-uri`), optional `definitionCid`, integer `score` and/or `components` map (`#scoreComponentValMap`: `#pointsComponentVal`, `#percentageComponentVal`, `#timeComponentVal`, `#enumComponentVal`, `#textComponentVal` keyed by component key), `recordedAt`, optional `displayScore`, and optional `tag`.
-- **Open-Union Genre `details` (`closed: false`)**: Carries rich non-ranked telemetry without bloating leaderboard definitions. Includes built-in `games.opengaming.defs#judgmentBreakdown` (`judgments` `#judgmentMap`, optional `judgmentOrder`, `maxCombo`, `totalEarly`, `totalLate`, `mode`, `inputMethod`), while games can attach any custom `$type` object.
-- **Chart/Build `version` & Deterministic `replay` Blob**:
-  - `version` (`string`): Hash or build identifier of the chart/level played.
-  - `replay` (`blob`, <= 2 MB): Optional deterministic input log or replay file stored directly in the player's PDS for client-side playback and serverless/post-EoS verification.
+- **Co-op / Duo / Squad Runs**: `participants` (`games.opengaming.defs#participant[]`) lists all teammates (`did`, `name`, `role`, `team`), and `runId` (`string`) shares a canonical run identifier across teammates' PDS receipts. AppViews deduplicate verified records sharing `(leaderboard, runId)` into **one** leaderboard rank while surfacing the run on every teammate's social/player queries!
+- **Daily / Procedural `seed`**: Records the deterministic seed (`seed: "2026-11-08"`), queryable via `?seed=`.
+- **Open-Union `details` (`#judgmentBreakdown`)**, **`version` (`rankedVersions`)**, and **`replay` Blob (`<= 2 MB`)**.
 
 ---
 
-## 3. Querying Rankings (`games.opengaming.leaderboard.getScores`)
+## 3. Querying Rankings & Obsolete PB History (`games.opengaming.leaderboard.getScores`)
 
 Supports:
-- `timeframe`: `allTime | weekly | daily`
-- `scope`: `public` (global) or `social` (intersects with `viewer` + `app.bsky.graph.follow`)
-- `sortBy`: Rank by any sortable component `id` (e.g. `?sortBy=ex-score`, `?sortBy=accuracy`, `?sortBy=clear-time`)
-- `version`: Filter to a specific chart/patch hash (defaults to `definition.rankedVersions` when defined)
-- Enriched `#scoreEntry` output with `issuer`, `components`, `version`, `hasReplay`, `replayCid`, and active ATProto `labels`.
+- `timeframe`: `allTime | monthly | weekly | daily`
+- `scope`: `public` or `social` (`viewer` follow graph)
+- `player`: Filter entries to a specific player DID/handle (ideal with `includeObsolete=true` to render a player's full PB progression history!)
+- `includeObsolete` (`boolean`, default `false`): Speedrun.com-style toggle. When `false`, returns only each competitor's active standing (`!obsolete`). When `true`, includes superseded historical runs marked with `obsolete: true`.
+- `sortBy`: Rank by any sortable component key
+- `dimensions`: Filter by sub-board dimension pairs (`key=val,key2=val2`)
+- `seed` & `version`: Filter by daily/procedural seed or chart/build hash.

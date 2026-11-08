@@ -1,12 +1,12 @@
 {
-  "$comment": "End-to-end Open Gaming example records grounded in Flappysky (https://flappysky.symmetricalboy.com) plus multi-component, redacted-stub, and replay-verifiable examples",
+  "$comment": "End-to-end Open Gaming v0.2 example records grounded in Flappysky (https://flappysky.symmetricalboy.com) plus local multi-component maps, sub-board dimensions, co-op participants, non-penalizing Game Jam Feats of Strength, unlock memories, daily seed challenges, and peer-co-signed PvP match results",
   "gameDefinition_onGamePds": {
     "uri": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
     "value": {
       "$type": "games.atmosphere.define",
       "name": "Flappysky",
       "tagline": "Flutter past skeets and collect likes across the Atmosphere.",
-      "description": "A fast-paced arcade game built to showcase open AT Protocol achievements and leaderboards.",
+      "description": "A fast-paced arcade game built to showcase open AT Protocol achievements, leaderboards, challenges, and matches.",
       "url": "https://flappysky.symmetricalboy.com",
       "publisher": "at://did:plc:flappyskygameexample",
       "category": "browser",
@@ -44,6 +44,18 @@
         "title": "First Flight",
         "description": "Cleared your very first post in Flappysky.",
         "requirement": "Clear 1 post in a single run.",
+        "translations": {
+          "ja": {
+            "title": "初フライト",
+            "description": "Flappyskyで最初のポストを飛び越えた。",
+            "requirement": "1回のランでポストを1つクリアする。"
+          },
+          "es": {
+            "title": "Primer Vuelo",
+            "description": "Superaste tu primera publicación en Flappysky.",
+            "requirement": "Supera 1 publicación en una sola partida."
+          }
+        },
         "icon": {
           "$type": "blob",
           "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
@@ -53,6 +65,7 @@
         "iconAlt": "A bright blue butterfly soaring over a rounded post.",
         "tier": "bronze",
         "hidden": false,
+        "countsTowardCompletion": true,
         "listOrder": 10,
         "createdAt": "2026-11-07T20:00:00.000Z"
       }
@@ -113,32 +126,91 @@
         ],
         "createdAt": "2026-11-08T05:00:00.000Z"
       }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/atproto-jam-2026",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "title": "ATProto Game Jam 2026 Pioneer",
+        "description": "Played Flappysky during the 2026 ATProto Game Jam window.",
+        "requirement": "Complete a run before November 22, 2026.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
+          "mimeType": "image/png",
+          "size": 48210
+        },
+        "tier": "gold",
+        "countsTowardCompletion": false,
+        "availableFrom": "2026-11-01T00:00:00.000Z",
+        "availableUntil": "2026-11-23T00:00:00.000Z",
+        "group": "Seasonal & Jam Feats",
+        "listOrder": 200,
+        "createdAt": "2026-11-08T06:00:00.000Z"
+      }
     }
   ],
-  "achievementUnlock_onPlayerPds": {
-    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.unlock/flappysky-first-flight",
-    "value": {
-      "$type": "games.opengaming.achievement.unlock",
-      "achievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/first-flight",
-      "definitionCid": "bafyreic7eoftckauk4n5sbsigibgkgabkm2bsyvo5ix6yqnmifemfzdwpi",
-      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
-      "player": "did:plc:33d7gnwiagm6cimpiepefp72",
-      "unlockedAt": "2026-11-07T21:15:00.000Z",
-      "signatures": [
-        {
-          "$type": "games.opengaming.defs#inlineSignature",
-          "key": "did:plc:flappyskygameexample#attestations",
-          "issuer": "did:plc:flappyskygameexample",
-          "issuedAt": "2026-11-07T21:15:00.120Z",
-          "rkey": "flappysky-first-flight",
-          "cid": "bafyreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori",
-          "signature": {
-            "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+  "achievementUnlock_onPlayerPds": [
+    {
+      "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.unlock/flappysky-first-flight",
+      "value": {
+        "$type": "games.opengaming.achievement.unlock",
+        "achievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/first-flight",
+        "definitionCid": "bafyreic7eoftckauk4n5sbsigibgkgabkm2bsyvo5ix6yqnmifemfzdwpi",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "unlockedAt": "2026-11-07T21:15:00.000Z",
+        "details": {
+          "$type": "games.opengaming.defs#unlockContext",
+          "summary": "Cleared first post with Monarch Butterfly wing loadout",
+          "playtimeMs": 14200,
+          "seed": "2026-11-07",
+          "loadout": ["Monarch Wings", "Tailwind Charm"],
+          "attributes": {
+            "character": "monarch",
+            "weather": "clear-skies"
           }
-        }
-      ]
+        },
+        "media": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
+          "mimeType": "image/png",
+          "size": 184320
+        },
+        "mediaAlt": "Screenshot of the Monarch butterfly gliding cleanly past its first post.",
+        "note": "First clean clear on launch night!",
+        "signatures": [
+          {
+            "$type": "games.opengaming.defs#inlineSignature",
+            "key": "did:plc:flappyskygameexample#attestations",
+            "issuer": "did:plc:flappyskygameexample",
+            "issuedAt": "2026-11-07T21:15:00.120Z",
+            "rkey": "flappysky-first-flight",
+            "cid": "bafyreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori",
+            "signature": {
+              "$bytes": "vp+3TZJwbP7/fmXrm+RXJR6Q7ETVm5qMdBxreaZGJk0+e4+9cUr9rjVED7L4uILREshVMSotoiJMUFTlcSqsyg=="
+            }
+          }
+        ]
+      }
+    },
+    {
+      "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.unlock/flappysky-jam-duo",
+      "value": {
+        "$type": "games.opengaming.achievement.unlock",
+        "achievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/atproto-jam-2026",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "unlockedAt": "2026-11-08T18:00:00.000Z",
+        "runId": "flappy-doubles-session-901",
+        "participants": [
+          { "did": "did:plc:33d7gnwiagm6cimpiepefp72", "role": "pilot", "team": "Sky Duo" },
+          { "name": "Player 2 (Couch Guest)", "role": "navigator", "team": "Sky Duo" }
+        ]
+      }
     }
-  },
+  ],
   "achievementProgress_onPlayerPds": {
     "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.achievement.progress/flappysky-banger-collector",
     "value": {
@@ -167,13 +239,14 @@
         },
         "iconAlt": "A golden arcade crown above blue clouds.",
         "sortOrder": "largerIsBetter",
+        "rankingMode": "best",
         "scoreFormat": {
           "kind": "numeric",
           "decimalPlaces": 0,
           "unitSingular": "pt",
           "unitPlural": "pts"
         },
-        "timeframes": ["daily", "weekly", "allTime"],
+        "timeframes": ["daily", "weekly", "monthly", "allTime"],
         "recordPolicy": "perWindowBest",
         "scoreMin": 1,
         "scoreMax": 9999,
@@ -186,8 +259,17 @@
       "value": {
         "$type": "games.opengaming.leaderboard.definition",
         "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
-        "name": "Blue Sky Theme [EXPERT 11+]",
-        "description": "Multi-component rhythm & speedrun stage showcasing forward-compatible component maps, legal chart version hashes, and multi-issuer EoS federation.",
+        "name": "蒼穹のテーマ [EXPERT 11+]",
+        "description": "Multi-component rhythm & speedrun stage showcasing local component types, sub-board dimensions, personalBests retention, legal chart hashes, and i18n translations.",
+        "translations": {
+          "en": {
+            "name": "Azure Sky Theme [EXPERT 11+]",
+            "description": "Expert 11+ chart with EX Score, Accuracy, Clear Lamp, and Clear Time."
+          },
+          "ja-Latn": {
+            "name": "Soukyuu no Theme [EXPERT 11+]"
+          }
+        },
         "icon": {
           "$type": "blob",
           "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
@@ -196,21 +278,21 @@
         },
         "components": {
           "ex-score": {
-            "$type": "games.opengaming.defs#pointsComponentDef",
+            "$type": "games.opengaming.leaderboard.definition#points",
             "name": "EX Score",
             "minimum": 0,
             "maximum": 1000000,
             "unitPlural": "EX"
           },
           "accuracy": {
-            "$type": "games.opengaming.defs#percentageComponentDef",
+            "$type": "games.opengaming.leaderboard.definition#percentage",
             "name": "Accuracy",
             "precision": 2,
             "minimum": 0,
             "maximum": 10100
           },
           "lamp": {
-            "$type": "games.opengaming.defs#enumComponentDef",
+            "$type": "games.opengaming.leaderboard.definition#enum",
             "name": "Clear Lamp",
             "values": [
               { "id": "all-perfect", "name": "ALL PERFECT" },
@@ -220,13 +302,35 @@
             ]
           },
           "clear-time": {
-            "$type": "games.opengaming.defs#timeComponentDef",
+            "$type": "games.opengaming.leaderboard.definition#time",
             "name": "Clear Time",
             "timeUnit": "milliseconds"
           }
         },
         "componentOrder": ["ex-score", "accuracy", "lamp", "clear-time"],
         "defaultComponent": "ex-score",
+        "dimensions": {
+          "mode": {
+            "name": "Play Mode",
+            "required": true,
+            "defaultValue": "4k",
+            "values": [
+              { "id": "4k", "name": "4-Key Singles" },
+              { "id": "7k", "name": "7-Key Singles" },
+              { "id": "doubles", "name": "Co-op Doubles" }
+            ]
+          },
+          "inputMethod": {
+            "name": "Input Method",
+            "values": [
+              { "id": "keyboard", "name": "Keyboard" },
+              { "id": "gamepad", "name": "Gamepad" },
+              { "id": "arcade-controller", "name": "Arcade Controller" },
+              { "id": "touch", "name": "Touch" }
+            ]
+          }
+        },
+        "dimensionOrder": ["mode", "inputMethod"],
         "detailsSchema": "games.opengaming.defs#judgmentBreakdown",
         "rankedVersions": [
           "md5:9e107d9d372bb6826bd81d3542a419d6"
@@ -234,10 +338,39 @@
         "trustedIssuers": [
           "did:plc:communityrevivalhost000"
         ],
-        "timeframes": ["allTime", "weekly"],
-        "recordPolicy": "perWindowBest",
+        "timeframes": ["allTime", "monthly", "weekly"],
+        "recordPolicy": "personalBests",
         "listOrder": 2,
         "createdAt": "2026-11-08T05:00:00.000Z"
+      }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/ranked-duel-elo",
+      "value": {
+        "$type": "games.opengaming.leaderboard.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "name": "Sky Duel Ranked Ladder (Elo)",
+        "description": "Live 1v1 PvP rating ladder using rankingMode: latest so current MMR reflects wins and losses while preserving rating history.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreie3g7qzowpxuzraqa4irir3hbnnmwbmlyhkx4bcgbhj45cz5ux4re" },
+          "mimeType": "image/png",
+          "size": 50112
+        },
+        "sortOrder": "largerIsBetter",
+        "rankingMode": "latest",
+        "scoreFormat": {
+          "kind": "numeric",
+          "decimalPlaces": 0,
+          "unitSingular": "Elo",
+          "unitPlural": "Elo"
+        },
+        "timeframes": ["allTime", "monthly"],
+        "startsAt": "2026-11-01T00:00:00.000Z",
+        "endsAt": "2026-12-01T00:00:00.000Z",
+        "recordPolicy": "everyRun",
+        "listOrder": 3,
+        "createdAt": "2026-11-08T06:00:00.000Z"
       }
     }
   ],
@@ -251,6 +384,7 @@
         "player": "did:plc:33d7gnwiagm6cimpiepefp72",
         "score": 42,
         "displayScore": "42 pts",
+        "seed": "2026-11-08",
         "tag": "posts:30,likes:12",
         "recordedAt": "2026-11-07T21:18:30.000Z",
         "signatures": [
@@ -277,10 +411,14 @@
         "score": 994210,
         "displayScore": "994,210 EX · 99.42% · FULL COMBO",
         "components": {
-          "ex-score": { "$type": "games.opengaming.defs#pointsComponentVal", "value": 994210 },
-          "accuracy": { "$type": "games.opengaming.defs#percentageComponentVal", "value": 9942 },
-          "lamp": { "$type": "games.opengaming.defs#enumComponentVal", "value": "full-combo" },
-          "clear-time": { "$type": "games.opengaming.defs#timeComponentVal", "value": 118420 }
+          "ex-score": { "$type": "games.opengaming.leaderboard.score#points", "value": 994210 },
+          "accuracy": { "$type": "games.opengaming.leaderboard.score#percentage", "value": 9942 },
+          "lamp": { "$type": "games.opengaming.leaderboard.score#enum", "value": "full-combo" },
+          "clear-time": { "$type": "games.opengaming.leaderboard.score#time", "value": 118420 }
+        },
+        "dimensions": {
+          "mode": "4k",
+          "inputMethod": "keyboard"
         },
         "details": {
           "$type": "games.opengaming.defs#judgmentBreakdown",
@@ -294,7 +432,7 @@
           "maxCombo": 859,
           "totalEarly": 35,
           "totalLate": 37,
-          "mode": "singles",
+          "mode": "4k",
           "inputMethod": "keyboard"
         },
         "version": "md5:9e107d9d372bb6826bd81d3542a419d6",
@@ -306,8 +444,96 @@
         },
         "recordedAt": "2026-11-08T05:12:00.000Z"
       }
+    },
+    {
+      "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.leaderboard.score/3mzrcoop002",
+      "value": {
+        "$type": "games.opengaming.leaderboard.score",
+        "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/rhythm-stage-1",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "player": "did:plc:33d7gnwiagm6cimpiepefp72",
+        "score": 998500,
+        "displayScore": "998,500 EX · 99.85% · ALL PERFECT",
+        "components": {
+          "ex-score": { "$type": "games.opengaming.leaderboard.score#points", "value": 998500 },
+          "accuracy": { "$type": "games.opengaming.leaderboard.score#percentage", "value": 9985 },
+          "lamp": { "$type": "games.opengaming.leaderboard.score#enum", "value": "all-perfect" },
+          "clear-time": { "$type": "games.opengaming.leaderboard.score#time", "value": 116100 }
+        },
+        "dimensions": {
+          "mode": "doubles",
+          "inputMethod": "arcade-controller"
+        },
+        "runId": "flappy-doubles-session-901",
+        "participants": [
+          { "did": "did:plc:33d7gnwiagm6cimpiepefp72", "role": "left-pad", "team": "Sky Duo" },
+          { "did": "did:plc:duopartnerexample0000000", "role": "right-pad", "team": "Sky Duo" }
+        ],
+        "version": "md5:9e107d9d372bb6826bd81d3542a419d6",
+        "recordedAt": "2026-11-08T06:20:00.000Z"
+      }
     }
   ],
+  "challengeDefinition_onGamePds": {
+    "uri": "at://did:plc:flappyskygameexample/games.opengaming.challenge.definition/daily-2026-11-08",
+    "value": {
+      "$type": "games.opengaming.challenge.definition",
+      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+      "title": "Daily Tailwind Seed #142",
+      "description": "Everyone flies the exact same seeded obstacle layout. Highest score before reset wins!",
+      "cadence": "daily",
+      "seed": "2026-11-08",
+      "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score",
+      "rewardAchievement": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/atproto-jam-2026",
+      "startsAt": "2026-11-08T00:00:00.000Z",
+      "endsAt": "2026-11-09T00:00:00.000Z",
+      "createdAt": "2026-11-08T00:00:00.000Z"
+    }
+  },
+  "matchResult_onPlayerPds": {
+    "uri": "at://did:plc:33d7gnwiagm6cimpiepefp72/games.opengaming.match.result/3mzrmatch001",
+    "value": {
+      "$type": "games.opengaming.match.result",
+      "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+      "matchId": "sky-duel-match-20261108-0042",
+      "leaderboard": "at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/ranked-duel-elo",
+      "mode": "1v1",
+      "bestOf": 3,
+      "durationMs": 195400,
+      "participants": [
+        {
+          "did": "did:plc:33d7gnwiagm6cimpiepefp72",
+          "character": "Monarch",
+          "outcome": "win",
+          "placement": 1,
+          "score": 2,
+          "ratingBefore": 1650,
+          "ratingAfter": 1668
+        },
+        {
+          "did": "did:plc:duopartnerexample0000000",
+          "character": "Swallowtail",
+          "outcome": "loss",
+          "placement": 2,
+          "score": 1,
+          "ratingBefore": 1672,
+          "ratingAfter": 1654
+        }
+      ],
+      "dimensions": {
+        "ruleset": "standard-ranked"
+      },
+      "details": {
+        "$type": "games.opengaming.match.result#setBreakdown",
+        "rounds": [
+          { "index": 1, "stage": "cirrus-spire", "winnerDid": "did:plc:33d7gnwiagm6cimpiepefp72", "summary": "48-39" },
+          { "index": 2, "stage": "sunset-canyon", "winnerDid": "did:plc:duopartnerexample0000000", "summary": "41-44" },
+          { "index": 3, "stage": "stormfront", "winnerDid": "did:plc:33d7gnwiagm6cimpiepefp72", "summary": "55-50" }
+        ]
+      },
+      "playedAt": "2026-11-08T18:30:00.000Z"
+    }
+  },
   "revocation_onGamePds": {
     "uri": "at://did:plc:flappyskygameexample/games.opengaming.revocation/bafyreibym4dl6h3luuk5mdlkhznlrzqqc57vdcqwfbe4swkddtmfgxwb34",
     "value": {

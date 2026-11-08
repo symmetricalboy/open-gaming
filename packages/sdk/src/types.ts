@@ -2,13 +2,26 @@ export type AchievementTier = 'bronze' | 'silver' | 'gold' | 'platinum' | (strin
 
 export type LeaderboardSortOrder = 'largerIsBetter' | 'smallerIsBetter' | (string & {});
 
+export type RankingMode = 'best' | 'latest' | (string & {});
+
 export type ScoreFormatKind = 'numeric' | 'time' | 'currency' | (string & {});
 
-export type Timeframe = 'daily' | 'weekly' | 'allTime';
+export type Timeframe = 'daily' | 'weekly' | 'monthly' | 'allTime';
 
-export type RecordPolicy = 'bestOnly' | 'perWindowBest' | 'everyRun';
+export type RecordPolicy =
+  | 'overwriteBest'
+  | 'personalBests'
+  | 'perWindowBest'
+  | 'everyRun'
+  | 'bestOnly';
 
-export type RevocationScope = 'attestation' | 'achievement' | 'leaderboard' | 'game';
+export type RevocationScope =
+  | 'attestation'
+  | 'achievement'
+  | 'leaderboard'
+  | 'match'
+  | 'challenge'
+  | 'game';
 
 export type RevocationReason =
   | 'cheating'
@@ -18,6 +31,24 @@ export type RevocationReason =
   | 'accountCompromised'
   | 'requestedByPlayer'
   | 'other'
+  | (string & {});
+
+export type ChallengeCadence =
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'seasonal'
+  | 'event'
+  | 'permanent'
+  | (string & {});
+
+export type MatchOutcome =
+  | 'win'
+  | 'loss'
+  | 'draw'
+  | 'forfeit'
+  | 'dnf'
+  | 'completed'
   | (string & {});
 
 export interface BytesWrapper {
@@ -48,17 +79,55 @@ export interface ScoreFormat {
   currencyCode?: string;
   unitSingular?: string;
   unitPlural?: string;
+  signedPrefix?: boolean;
 }
 
-/* --- Multi-Component Leaderboard Definitions & Values (Forward-Compatible Lexicon Map Convention) --- */
-
-export interface EnumOption {
+export interface OptionItem {
   id: string;
   name: string;
 }
 
+/** Alias retained for readability across enum component helpers. */
+export type EnumOption = OptionItem;
+
+export interface Participant {
+  did?: string;
+  name?: string;
+  role?: string;
+  team?: string;
+}
+
+export type StringMap = Record<string, string>;
+
+export interface Translation {
+  title?: string;
+  name?: string;
+  description?: string;
+  requirement?: string;
+}
+
+export type TranslationMap = Record<string, Translation>;
+
+export interface UnlockContext {
+  $type: 'games.opengaming.defs#unlockContext';
+  summary?: string;
+  playtimeMs?: number;
+  seed?: string;
+  loadout?: string[];
+  attributes?: StringMap;
+}
+
+export type UnlockDetails =
+  | UnlockContext
+  | ({
+      $type: string;
+      [key: string]: unknown;
+    });
+
+/* --- Local Multi-Component Leaderboard Schemas (`leaderboard.definition#*` & `leaderboard.score#*`) --- */
+
 export interface PointsComponentDef {
-  $type: 'games.opengaming.defs#pointsComponentDef';
+  $type: 'games.opengaming.leaderboard.definition#points';
   name: string;
   sortOrder?: LeaderboardSortOrder;
   minimum?: number;
@@ -68,7 +137,7 @@ export interface PointsComponentDef {
 }
 
 export interface PercentageComponentDef {
-  $type: 'games.opengaming.defs#percentageComponentDef';
+  $type: 'games.opengaming.leaderboard.definition#percentage';
   name: string;
   sortOrder?: LeaderboardSortOrder;
   precision?: number;
@@ -77,7 +146,7 @@ export interface PercentageComponentDef {
 }
 
 export interface TimeComponentDef {
-  $type: 'games.opengaming.defs#timeComponentDef';
+  $type: 'games.opengaming.leaderboard.definition#time';
   name: string;
   sortOrder?: LeaderboardSortOrder;
   timeUnit?: 'milliseconds' | 'seconds' | (string & {});
@@ -86,14 +155,14 @@ export interface TimeComponentDef {
 }
 
 export interface EnumComponentDef {
-  $type: 'games.opengaming.defs#enumComponentDef';
+  $type: 'games.opengaming.leaderboard.definition#enum';
   name: string;
   sortOrder?: LeaderboardSortOrder;
-  values: EnumOption[];
+  values: OptionItem[];
 }
 
 export interface TextComponentDef {
-  $type: 'games.opengaming.defs#textComponentDef';
+  $type: 'games.opengaming.leaderboard.definition#text';
   name: string;
   maxGraphemes?: number;
 }
@@ -108,27 +177,27 @@ export type ScoreComponentDef =
 export type ScoreComponentDefMap = Record<string, ScoreComponentDef>;
 
 export interface PointsComponentVal {
-  $type: 'games.opengaming.defs#pointsComponentVal';
+  $type: 'games.opengaming.leaderboard.score#points';
   value: number;
 }
 
 export interface PercentageComponentVal {
-  $type: 'games.opengaming.defs#percentageComponentVal';
+  $type: 'games.opengaming.leaderboard.score#percentage';
   value: number;
 }
 
 export interface TimeComponentVal {
-  $type: 'games.opengaming.defs#timeComponentVal';
+  $type: 'games.opengaming.leaderboard.score#time';
   value: number;
 }
 
 export interface EnumComponentVal {
-  $type: 'games.opengaming.defs#enumComponentVal';
+  $type: 'games.opengaming.leaderboard.score#enum';
   value: string;
 }
 
 export interface TextComponentVal {
-  $type: 'games.opengaming.defs#textComponentVal';
+  $type: 'games.opengaming.leaderboard.score#text';
   value: string;
 }
 
@@ -140,6 +209,18 @@ export type ScoreComponentVal =
   | TextComponentVal;
 
 export type ScoreComponentValMap = Record<string, ScoreComponentVal>;
+
+/* --- Parameterized Sub-Board Dimensions (`leaderboard.definition#dimension`) --- */
+
+export interface DimensionDef {
+  name: string;
+  values?: OptionItem[];
+  required?: boolean;
+  allowCustomValues?: boolean;
+  defaultValue?: string;
+}
+
+export type DimensionDefMap = Record<string, DimensionDef>;
 
 export interface JudgmentEntry {
   total: number;
@@ -175,12 +256,18 @@ export interface AchievementDefinitionRecord {
   title?: string;
   description?: string;
   requirement?: string;
+  translations?: TranslationMap;
   icon?: BlobRef;
   iconAlt?: string;
   lockedIcon?: BlobRef;
   tier?: AchievementTier;
   hidden?: boolean;
   hiddenSpace?: string;
+  countsTowardCompletion?: boolean;
+  repeatable?: boolean;
+  availableFrom?: string;
+  availableUntil?: string;
+  retired?: boolean;
   stepsNeeded?: number;
   group?: string;
   listOrder?: number;
@@ -198,6 +285,12 @@ export interface AchievementUnlockRecord {
   player?: string;
   unlockedAt: string;
   stepsCompleted?: number;
+  participants?: Participant[];
+  runId?: string;
+  details?: UnlockDetails;
+  media?: BlobRef;
+  mediaAlt?: string;
+  note?: string;
   signatures?: InlineSignature[];
 }
 
@@ -217,17 +310,23 @@ export interface LeaderboardDefinitionRecord {
   game: string;
   name: string;
   description?: string;
+  translations?: TranslationMap;
   icon: BlobRef;
   iconAlt?: string;
   sortOrder?: LeaderboardSortOrder;
+  rankingMode?: RankingMode;
   scoreFormat?: ScoreFormat;
   components?: ScoreComponentDefMap;
   componentOrder?: string[];
   defaultComponent?: string;
+  dimensions?: DimensionDefMap;
+  dimensionOrder?: string[];
   detailsSchema?: string;
   rankedVersions?: string[];
   trustedIssuers?: string[];
   timeframes: Timeframe[];
+  startsAt?: string;
+  endsAt?: string;
   recordPolicy: RecordPolicy;
   scoreMin?: number;
   scoreMax?: number;
@@ -245,11 +344,90 @@ export interface LeaderboardScoreRecord {
   score?: number;
   displayScore?: string;
   components?: ScoreComponentValMap;
+  dimensions?: StringMap;
+  seed?: string;
+  participants?: Participant[];
+  runId?: string;
   details?: ScoreDetails;
   version?: string;
   replay?: BlobRef;
   tag?: string;
   recordedAt: string;
+  signatures?: InlineSignature[];
+}
+
+export interface ChallengeDefinitionRecord {
+  $type: 'games.opengaming.challenge.definition';
+  game: string;
+  title: string;
+  description?: string;
+  translations?: TranslationMap;
+  icon?: BlobRef;
+  iconAlt?: string;
+  cadence: ChallengeCadence;
+  seed?: string;
+  targetSteps?: number;
+  leaderboard?: string;
+  rewardAchievement?: string;
+  dimensions?: StringMap;
+  startsAt?: string;
+  endsAt?: string;
+  trustedIssuers?: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MatchParticipant {
+  did?: string;
+  name?: string;
+  team?: string;
+  role?: string;
+  character?: string;
+  outcome: MatchOutcome;
+  placement?: number;
+  score?: number;
+  scoreText?: string;
+  ratingBefore?: number;
+  ratingAfter?: number;
+  ratingDeviation?: number;
+}
+
+export interface MatchRoundResult {
+  index: number;
+  stage?: string;
+  winnerDid?: string;
+  winnerTeam?: string;
+  summary?: string;
+}
+
+export interface MatchSetBreakdown {
+  $type: 'games.opengaming.match.result#setBreakdown';
+  rounds: MatchRoundResult[];
+  notation?: string;
+}
+
+export type MatchDetails =
+  | MatchSetBreakdown
+  | ({
+      $type: string;
+      [key: string]: unknown;
+    });
+
+export interface MatchResultRecord {
+  $type: 'games.opengaming.match.result';
+  game: string;
+  matchId?: string;
+  leaderboard?: string;
+  challenge?: string;
+  mode?: string;
+  bestOf?: number;
+  durationMs?: number;
+  participants: MatchParticipant[];
+  dimensions?: StringMap;
+  details?: MatchDetails;
+  version?: string;
+  replay?: BlobRef;
+  playedAt: string;
   signatures?: InlineSignature[];
 }
 
@@ -293,6 +471,7 @@ export interface AtprotoLabel {
 
 export type VerificationErrorCode =
   | 'missing_signatures'
+  | 'missing_participant_signatures'
   | 'player_mismatch'
   | 'issuer_mismatch'
   | 'rkey_mismatch'
@@ -310,7 +489,8 @@ export type VerificationResult =
       issuerDid: string;
       keyId: string;
       attestationCid: string;
-      verificationMethod?: 'attestation' | 'community-label';
+      verificationMethod?: 'attestation' | 'community-label' | 'multi-participant';
+      coSigners?: string[];
     }
   | {
       verified: false;
@@ -334,6 +514,7 @@ export interface GameAchievementSummary {
   game: string;
   unlockedCount: number;
   totalAchievements: number;
+  bonusUnlockedCount?: number;
   completionPercent: number;
   completed: boolean;
   latestUnlockAt?: string;

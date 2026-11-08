@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Published in the player's own PDS when an achievement is earned. Display metadata lives on the game's `achievement.definition` record; legitimacy is proven via optional inline CID-first cryptographic `signatures` (supporting publisher or federated `trustedIssuers` DID keys) and moderated via publisher `games.opengaming.revocation` records and/or ATProto Labelers (`com.atproto.label.defs#label`).",
+      "description": "Published in the player's own PDS when an achievement is earned. Supports solo or co-op squad clears (`participants` + `runId`), RPG Hall-of-Fame / roguelike / cozy victory context (`details` + commemorative `media` snapshot), optional inline CID-first cryptographic `signatures`, and moderation via `games.opengaming.revocation` records and/or ATProto Labelers.",
       "key": "any",
       "record": {
         "type": "object",
@@ -40,6 +40,46 @@
             "type": "integer",
             "minimum": 1,
             "description": "Optional final step count reached when unlocking an incremental achievement."
+          },
+          "participants": {
+            "type": "array",
+            "maxLength": 32,
+            "description": "Optional roster of co-op teammates, duo partners, or raid party members who earned this achievement together.",
+            "items": {
+              "type": "ref",
+              "ref": "games.opengaming.defs#participant"
+            }
+          },
+          "runId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional shared deterministic session/clear identifier linking co-op teammates' unlock receipts (or correlating an unlock to a matching `leaderboard.score`)."
+          },
+          "details": {
+            "type": "union",
+            "description": "Optional open-union clear context (e.g. `games.opengaming.defs#unlockContext` for RPG Hall-of-Fame parties, roguelike loadouts, cozy catches, or any game-defined `$type` object).",
+            "refs": [
+              "games.opengaming.defs#unlockContext"
+            ],
+            "closed": false
+          },
+          "media": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 2000000,
+            "description": "Optional commemorative screenshot, victory card, photo, or postcard stored in the player's PDS alongside the unlock."
+          },
+          "mediaAlt": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Accessibility alt text for `media`."
+          },
+          "note": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Optional commemorative caption or player/game note attached to the unlock."
           },
           "signatures": {
             "type": "array",

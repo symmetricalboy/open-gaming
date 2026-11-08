@@ -4,6 +4,7 @@ export * from './keys.js';
 export * from './plc.js';
 export * from './labels.js';
 export * from './attestation.js';
+export * from './matches.js';
 export * from './revocation.js';
 export * from './profile.js';
 export * from './leaderboards.js';

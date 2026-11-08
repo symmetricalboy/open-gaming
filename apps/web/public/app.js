@@ -169,17 +169,24 @@ async function openProofInspector(recordUri) {
   try {
     const data = await fetchJson(`/api/proof?uri=${encodeURIComponent(recordUri)}`);
     const isLabelVerified = Boolean(data.verified && String(data.keyId || '').startsWith('label:'));
+    const isMultiParticipant = Boolean(data.verified && data.verificationMethod === 'multi-participant');
     const statusBadge = data.labelInvalidated
       ? '<span class="proof-chip revoked">Invalidated by Anti-Cheat Label</span>'
       : data.revoked
         ? '<span class="proof-chip revoked">Revoked on Game PDS</span>'
-        : isLabelVerified
-          ? '<span class="proof-chip verified">Verified via Community Replay Label</span>'
-          : data.verified
-            ? '<span class="proof-chip verified">Verified Inline Signature</span>'
-            : `<span class="proof-chip revoked">Rejected (${esc(data.verificationError || 'unverified')})</span>`;
+        : isMultiParticipant
+          ? '<span class="proof-chip verified">Verified P2P Multi-Participant Co-Signatures</span>'
+          : isLabelVerified
+            ? '<span class="proof-chip verified">Verified via Community Replay Label</span>'
+            : data.verified
+              ? '<span class="proof-chip verified">Verified Inline Signature</span>'
+              : `<span class="proof-chip revoked">Rejected (${esc(data.verificationError || 'unverified')})</span>`;
 
     const rkeyBound = data.record?.signatures?.[0]?.rkey;
+    const coSignersHtml =
+      Array.isArray(data.coSigners) && data.coSigners.length > 0
+        ? `<dt>Co-Signing Participant DIDs</dt><dd>${data.coSigners.map((d) => `<code>${esc(d)}</code>`).join(' &middot; ')}</dd>`
+        : '';
 
     const labelsSection =
       Array.isArray(data.activeLabels) && data.activeLabels.length > 0
@@ -225,6 +232,7 @@ async function openProofInspector(recordUri) {
         <dt>Player Repo DID</dt>
         <dd><code>${esc(data.playerDid)}</code></dd>
         ${data.issuerDid ? `<dt>Signing / Verifying Issuer</dt><dd><code>${esc(data.issuerDid)}</code></dd>` : ''}
+        ${coSignersHtml}
         <dt>Verification Key / Source</dt>
         <dd><code>${esc(data.keyId || 'None (Unsigned)')}</code></dd>
         <dt>Attestation CID</dt>
@@ -247,6 +255,61 @@ function renderTierBadge(tier) {
   if (!tier) return '';
   const safe = String(tier).toLowerCase();
   return `<span class="badge tier-${esc(safe)}">${esc(tier)}</span>`;
+}
+
+function renderMatchListHtml(matches) {
+  if (!Array.isArray(matches) || matches.length === 0) return '';
+  return `<ul class="cards-grid single-col-grid" role="list">${matches
+    .map((m) => {
+      const participantsHtml = (m.participants || [])
+        .map((p) => {
+          const label = p.handle ? `@${esc(p.handle)}` : esc(p.displayName || p.name || p.did || 'Guest');
+          const actorLink = p.did
+            ? `<a href="/player?actor=${encodeURIComponent(p.handle || p.did)}" data-nav="/player?actor=${encodeURIComponent(p.handle || p.did)}"><strong>${label}</strong></a>`
+            : `<strong>${label}</strong>`;
+          const computedDelta =
+            typeof p.ratingDelta === 'number'
+              ? p.ratingDelta
+              : typeof p.ratingAfter === 'number' && typeof p.ratingBefore === 'number'
+                ? p.ratingAfter - p.ratingBefore
+                : undefined;
+          const deltaStr =
+            typeof computedDelta === 'number'
+              ? ` <span class="badge">${computedDelta > 0 ? `+${computedDelta}` : String(computedDelta)}${
+                  typeof p.ratingAfter === 'number' ? ` &rarr; ${p.ratingAfter}` : ''
+                }</span>`
+              : typeof p.ratingAfter === 'number'
+                ? ` <span class="badge">${p.ratingAfter}</span>`
+                : '';
+          const scoreStr = typeof p.score === 'number' ? ` <span class="score-mono">${esc(p.score)}</span>` : '';
+          return `<span>${actorLink} <span class="badge">${esc(p.outcome)}</span>${scoreStr}${deltaStr}</span>`;
+        })
+        .join(' <span class="muted-text">vs</span> ');
+
+      const methodBadge =
+        m.verificationMethod === 'multi-participant'
+          ? '<span class="badge badge-accent">P2P Co-Signed</span>'
+          : m.verificationMethod === 'community-label'
+            ? '<span class="badge badge-accent">Replay Label</span>'
+            : '<span class="badge">Host Attested</span>';
+
+      return `
+        <li class="card">
+          <div class="pill-row space-between">
+            <div class="pill-row">
+              ${participantsHtml}
+              ${m.mode ? `<span class="badge">${esc(m.mode)}</span>` : ''}
+              ${methodBadge}
+            </div>
+            <div class="pill-row">
+              <span class="muted-text">${formatTime(m.playedAt)}</span>
+              <button type="button" class="proof-chip verified" data-proof-uri="${esc(m.uri)}">Proof</button>
+            </div>
+          </div>
+        </li>
+      `;
+    })
+    .join('')}</ul>`;
 }
 
 /* --- View Renderers --- */
@@ -520,6 +583,9 @@ async function renderGameDetail(searchParams) {
               <div class="pill-row">
                 <h3>${esc(displayTitle)}</h3>
                 ${renderTierBadge(a.tier)}
+                ${a.countsTowardCompletion === false ? '<span class="badge">Bonus / Feat of Strength</span>' : ''}
+                ${a.repeatable ? '<span class="badge">Repeatable</span>' : ''}
+                ${a.retired ? '<span class="badge">Retired</span>' : ''}
                 ${a.hidden ? '<span class="badge">Hidden</span>' : ''}
                 ${a.isRedactedStub || a.hiddenSpace ? '<span class="badge badge-accent">Space-Gated Stub</span>' : ''}
               </div>
@@ -596,9 +662,9 @@ async function renderGameDetail(searchParams) {
       </div>
 
       <div class="filter-bar" style="margin-block-end: 0;">
-        <form id="game-viewer-filter-form" class="pill-row" data-game-uri="${esc(uri)}">
+        <form id="game-viewer-filter-form" action="/game" method="GET" class="pill-row" data-game-uri="${esc(uri)}">
           <label for="game-viewer-input" class="muted-text">Compare against player:</label>
-          <input type="text" id="game-viewer-input" name="viewer" value="${esc(viewer)}" placeholder="symmetricalboy.com">
+          <input type="text" id="game-viewer-input" name="viewer" value="${esc(viewer)}" placeholder="symmetricalboy.com" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button type="submit" class="btn btn-subtle">Compare</button>
           ${
             viewer
@@ -611,6 +677,53 @@ async function renderGameDetail(searchParams) {
         </a>
       </div>
     </section>
+
+    ${
+      Array.isArray(data.challenges) && data.challenges.length > 0
+        ? `
+          <section class="section-block">
+            <div class="section-header">
+              <h2>Challenges &amp; Rotating Quests (${Number(data.challenges.length)})</h2>
+              <span class="muted-text"><code>games.opengaming.challenge.definition</code></span>
+            </div>
+            <ul class="cards-grid" role="list">
+              ${data.challenges
+                .map((c) => {
+                  const lbParams = new URLSearchParams();
+                  if (c.leaderboardUri) lbParams.set('leaderboard', c.leaderboardUri);
+                  if (c.seed) lbParams.set('seed', c.seed);
+                  if (c.dimensions && typeof c.dimensions === 'object') {
+                    const dimPairs = Object.entries(c.dimensions)
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(',');
+                    if (dimPairs) lbParams.set('dimensions', dimPairs);
+                  }
+                  return `
+                    <li class="card">
+                      <div class="pill-row">
+                        <h3>${esc(c.title)}</h3>
+                        <span class="badge badge-accent">${esc(c.cadence)}</span>
+                        ${c.seed ? `<span class="badge">Seed: <code>${esc(c.seed)}</code></span>` : ''}
+                        ${c.targetSteps ? `<span class="badge">${Number(c.targetSteps)} steps</span>` : ''}
+                      </div>
+                      ${c.description ? `<p class="muted-text">${esc(c.description)}</p>` : ''}
+                      <div class="pill-row card-footer-row">
+                        <span class="muted-text">${c.startsAt ? formatTime(c.startsAt) : 'Active'}${c.endsAt ? ` &rarr; ${formatTime(c.endsAt)}` : ''}</span>
+                        ${
+                          c.leaderboardUri
+                            ? `<a href="/leaderboards?${esc(lbParams.toString())}" data-nav="/leaderboards?${esc(lbParams.toString())}" class="btn btn-subtle">Challenge Board &rarr;</a>`
+                            : ''
+                        }
+                      </div>
+                    </li>
+                  `;
+                })
+                .join('')}
+            </ul>
+          </section>
+        `
+        : ''
+    }
 
     <section class="section-block">
       <div class="section-header">
@@ -626,6 +739,20 @@ async function renderGameDetail(searchParams) {
       </div>
       <div class="two-col-grid">${lbsHtml}</div>
     </section>
+
+    ${
+      Array.isArray(data.recentMatches) && data.recentMatches.length > 0
+        ? `
+          <section class="section-block">
+            <div class="section-header">
+              <h2>Recent Verified Matches</h2>
+              <span class="muted-text"><code>games.opengaming.match.result</code></span>
+            </div>
+            ${renderMatchListHtml(data.recentMatches)}
+          </section>
+        `
+        : ''
+    }
   `;
 }
 
@@ -640,7 +767,11 @@ async function renderLeaderboards(searchParams) {
   const timeframe = searchParams.get('timeframe') || 'allTime';
   const scope = searchParams.get('scope') || 'public';
   const viewer = searchParams.get('viewer') || (scope === 'social' ? 'symmetricalboy.com' : '');
+  const player = searchParams.get('player') || '';
+  const includeObsolete = searchParams.get('includeObsolete') === 'true';
   const sortBy = searchParams.get('sortBy') || '';
+  const dimensions = searchParams.get('dimensions') || '';
+  const seed = searchParams.get('seed') || '';
   const version = searchParams.get('version') || '';
 
   const queryParams = new URLSearchParams({
@@ -649,7 +780,11 @@ async function renderLeaderboards(searchParams) {
     scope,
   });
   if (viewer) queryParams.set('viewer', viewer);
+  if (player) queryParams.set('player', player);
+  if (includeObsolete) queryParams.set('includeObsolete', 'true');
   if (sortBy) queryParams.set('sortBy', sortBy);
+  if (dimensions) queryParams.set('dimensions', dimensions);
+  if (seed) queryParams.set('seed', seed);
   if (version) queryParams.set('version', version);
 
   const board = await fetchJson(`/api/leaderboard?${queryParams.toString()}`);
@@ -664,7 +799,7 @@ async function renderLeaderboards(searchParams) {
     )
     .join('');
 
-  const tfLabels = { allTime: 'All-Time', weekly: 'Weekly', daily: 'Daily' };
+  const tfLabels = { allTime: 'All-Time', monthly: 'Monthly', weekly: 'Weekly', daily: 'Daily' };
   const tfButtons = board.definition.timeframes
     .map((tf) => {
       const next = new URLSearchParams(queryParams);
@@ -694,8 +829,68 @@ async function renderLeaderboards(searchParams) {
       : Object.keys(compMap);
   const compDefs = orderedCompIds.map((id) => ({ id, ...compMap[id] }));
   const hasComponents = compDefs.length > 0;
-  const sortableComps = compDefs.filter((c) => c.$type !== 'games.opengaming.defs#textComponentDef');
+  const sortableComps = compDefs.filter((c) => c.$type !== 'games.opengaming.leaderboard.definition#text');
   const activeSortId = board.sortedBy || board.definition.defaultComponent || sortableComps[0]?.id || '';
+
+  const dimMap =
+    board.definition.dimensions &&
+    typeof board.definition.dimensions === 'object' &&
+    !Array.isArray(board.definition.dimensions)
+      ? board.definition.dimensions
+      : {};
+  const orderedDimIds =
+    Array.isArray(board.definition.dimensionOrder) && board.definition.dimensionOrder.length > 0
+      ? board.definition.dimensionOrder.filter((id) => dimMap[id])
+      : Object.keys(dimMap);
+  const activeDims = board.activeDimensionsFilter && typeof board.activeDimensionsFilter === 'object' ? board.activeDimensionsFilter : {};
+
+  const dimensionsFilterBar =
+    orderedDimIds.length > 0
+      ? `
+        <div class="pill-row">
+          ${orderedDimIds
+            .map((dimKey) => {
+              const dDef = dimMap[dimKey];
+              const currentVal = activeDims[dimKey] || '';
+              const serializeDims = (nextDims) =>
+                Object.entries(nextDims)
+                  .filter(([, v]) => Boolean(v))
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(',');
+              const allNext = new URLSearchParams(queryParams);
+              const withoutDim = { ...activeDims };
+              delete withoutDim[dimKey];
+              const withoutStr = serializeDims(withoutDim);
+              if (withoutStr) allNext.set('dimensions', withoutStr);
+              else allNext.delete('dimensions');
+
+              const valButtons = (Array.isArray(dDef.values) ? dDef.values : [])
+                .map((opt) => {
+                  const vp = new URLSearchParams(queryParams);
+                  const withDim = { ...activeDims, [dimKey]: opt.id };
+                  vp.set('dimensions', serializeDims(withDim));
+                  const isActive = currentVal === opt.id;
+                  return `<button type="button" data-nav="/leaderboards?${esc(vp.toString())}" aria-pressed="${isActive}">${esc(opt.name || opt.label || opt.id)}</button>`;
+                })
+                .join('');
+
+              return `
+                <div class="pill-row">
+                  <span class="muted-text">${esc(dDef.name)}:</span>
+                  <div class="segmented" role="group" aria-label="Filter by ${esc(dDef.name)}">
+                    <button type="button" data-nav="/leaderboards?${esc(allNext.toString())}" aria-pressed="${!currentVal}">All</button>
+                    ${valButtons}
+                  </div>
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+      `
+      : '';
+
+  const obsoleteBaseParams = new URLSearchParams(queryParams);
+  obsoleteBaseParams.delete('includeObsolete');
 
   const componentSortBar =
     sortableComps.length > 1
@@ -771,7 +966,14 @@ async function renderLeaderboards(searchParams) {
                 .join('')
             : `<td><span class="score-mono">${esc(e.displayScore)}</span></td>`;
 
+          const dimChips =
+            e.dimensions && typeof e.dimensions === 'object'
+              ? Object.entries(e.dimensions).map(([k, v]) => `<span class="badge">${esc(k)}: <code>${esc(v)}</code></span>`)
+              : [];
           const metaChips = [
+            e.obsolete ? '<span class="badge">Obsolete PB</span>' : '',
+            ...dimChips,
+            e.seed ? `<span class="badge">Seed: <code>${esc(e.seed)}</code></span>` : '',
             e.tag ? `<code>${esc(e.tag)}</code>` : '',
             e.version ? `<span class="badge">${esc(e.version.length > 18 ? `${e.version.slice(0, 15)}…` : e.version)}</span>` : '',
             e.hasReplay && e.replayDownloadUrl
@@ -784,19 +986,32 @@ async function renderLeaderboards(searchParams) {
             .filter(Boolean)
             .join(' ');
 
+          const squadHtml =
+            Array.isArray(e.participants) && e.participants.length > 1
+              ? `<div class="muted-text">Squad: ${e.participants
+                  .map((p) => {
+                    const pLabel = p.handle ? `@${esc(p.handle)}` : esc(p.displayName || p.name || p.did || 'Guest');
+                    return p.did
+                      ? `<a href="/player?actor=${encodeURIComponent(p.handle || p.did)}" data-nav="/player?actor=${encodeURIComponent(p.handle || p.did)}">${pLabel}</a>`
+                      : pLabel;
+                  })
+                  .join(' &middot; ')}</div>`
+              : '';
+
           const proofLabel =
             e.verificationMethod === 'community-label'
               ? 'Community Verified'
               : `Verified &middot; ${esc(shortCid(e.attestationCid))}`;
 
           return `
-            <tr class="${isViewer ? 'viewer-highlight' : ''}">
-              <th scope="row">#${Number(e.rank)}</th>
+            <tr class="${isViewer ? 'viewer-highlight' : ''} ${e.obsolete ? 'obsolete-row' : ''}">
+              <th scope="row">${e.obsolete ? `PB (${Number(e.rank)})` : `#${Number(e.rank)}`}</th>
               <td>
                 <a href="/player?actor=${encodeURIComponent(e.handle || e.player)}" data-nav="/player?actor=${encodeURIComponent(e.handle || e.player)}">
                   <strong>@${esc(e.handle || e.displayName)}</strong>
                 </a>
                 <div class="muted-text"><code>${esc(e.player)}</code></div>
+                ${squadHtml}
               </td>
               ${scoreCellsHtml}
               <td>${metaChips ? `<div class="pill-row">${metaChips}</div>` : '<span class="muted-text">—</span>'}</td>
@@ -819,7 +1034,9 @@ async function renderLeaderboards(searchParams) {
         <p class="muted-text">
           ${esc(board.definition.description || '')} &middot;
           Policy: <code>${esc(board.definition.recordPolicy)}</code> &middot;
+          Mode: <code>${esc(board.definition.rankingMode || 'best')}</code> &middot;
           ${hasComponents ? `Sorted by: <code>${esc(activeSortId)}</code>` : `Order: <code>${esc(board.definition.sortOrder)}</code>`}
+          ${board.definition.startsAt || board.definition.endsAt ? ` &middot; Window: ${board.definition.startsAt ? formatTime(board.definition.startsAt) : 'Open'} &rarr; ${board.definition.endsAt ? formatTime(board.definition.endsAt) : 'Open'}` : ''}
           ${board.definition.trustedIssuers?.length ? ` &middot; Federated Issuers: <strong>+${Number(board.definition.trustedIssuers.length)}</strong>` : ''}
         </p>
       </div>
@@ -843,13 +1060,23 @@ async function renderLeaderboards(searchParams) {
           <button type="button" data-nav="/leaderboards?${esc(publicParams.toString())}" aria-pressed="${scope === 'public'}">Global</button>
           <button type="button" data-nav="/leaderboards?${esc(socialParams.toString())}" aria-pressed="${scope === 'social'}">Following (Social)</button>
         </div>
+
+        <label for="lb-include-obsolete" class="checkbox-pill">
+          <input type="checkbox" id="lb-include-obsolete" name="includeObsolete" data-base-query="${esc(obsoleteBaseParams.toString())}" ${includeObsolete ? 'checked' : ''}>
+          Show obsolete PBs
+        </label>
       </div>
 
       ${componentSortBar}
+      ${dimensionsFilterBar}
 
-      <form id="lb-viewer-form" class="pill-row" data-lb-uri="${esc(selectedUri)}" data-timeframe="${esc(timeframe)}" data-scope="${esc(scope)}" data-sort-by="${esc(sortBy)}" data-version="${esc(version)}">
-        <label for="lb-viewer-input" class="muted-text">Social Viewer:</label>
-        <input type="text" id="lb-viewer-input" name="viewer" value="${esc(viewer)}" placeholder="symmetricalboy.com">
+      <form id="lb-viewer-form" action="/leaderboards" method="GET" class="pill-row" data-lb-uri="${esc(selectedUri)}" data-timeframe="${esc(timeframe)}" data-scope="${esc(scope)}" data-sort-by="${esc(sortBy)}" data-dimensions="${esc(dimensions)}" data-version="${esc(version)}" data-include-obsolete="${includeObsolete ? 'true' : ''}">
+        <label for="lb-viewer-input" class="muted-text">Viewer:</label>
+        <input type="text" id="lb-viewer-input" name="viewer" value="${esc(viewer)}" placeholder="symmetricalboy.com" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <label for="lb-player-input" class="muted-text">Player History:</label>
+        <input type="text" id="lb-player-input" name="player" value="${esc(player)}" placeholder="filter handle/DID" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <label for="lb-seed-input" class="muted-text">Seed:</label>
+        <input type="text" id="lb-seed-input" name="seed" value="${esc(seed)}" placeholder="daily seed" autocorrect="off" autocapitalize="off" spellcheck="false">
         <button type="submit" class="btn btn-subtle">Apply</button>
       </form>
     </div>
@@ -923,7 +1150,10 @@ async function renderPlayerGamercard(searchParams) {
               <div style="min-inline-size: 13rem;">
                 <div class="progress-wrap">
                   <div class="progress-meta">
-                    <span><strong>${Number(g.unlockedCount)} / ${Number(g.totalAchievements)}</strong> Achievements</span>
+                    <span>
+                      <strong>${Number(g.unlockedCount)} / ${Number(g.totalAchievements)}</strong> Achievements
+                      ${Number(g.bonusUnlockedCount || 0) > 0 ? `<span class="badge">+${Number(g.bonusUnlockedCount)} Bonus</span>` : ''}
+                    </span>
                     <span><strong>${Number(g.completionPercent)}%</strong></span>
                   </div>
                   <progress value="${Number(g.unlockedCount)}" max="${Math.max(1, Number(g.totalAchievements))}" aria-label="${esc(g.gameName)} completion"></progress>
@@ -934,7 +1164,27 @@ async function renderPlayerGamercard(searchParams) {
             <ul class="cards-grid" role="list">
               ${g.unlockedBadges
                 .map(
-                  (b) => `
+                  (b) => {
+                    const contextSummary =
+                      b.details && typeof b.details === 'object'
+                        ? [
+                            b.details.summary,
+                            b.details.character,
+                            b.details.difficulty,
+                            ...(b.details.attributes && typeof b.details.attributes === 'object'
+                              ? Object.entries(b.details.attributes).map(([k, v]) => `${k}: ${v}`)
+                              : []),
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')
+                        : '';
+                    const coOpStr =
+                      Array.isArray(b.participants) && b.participants.length > 1
+                        ? b.participants
+                            .map((p) => (p.handle ? `@${esc(p.handle)}` : esc(p.displayName || p.name || p.did || 'Guest')))
+                            .join(', ')
+                        : '';
+                    return `
                   <li class="card" style="background: var(--surface-elevated); padding: 0.85rem;">
                     <div class="card-row">
                       <img src="${esc(b.iconUrl || '/assets/icons/locked.svg')}" alt="${esc(b.iconAlt)}" width="44" height="44" class="ach-icon" loading="lazy">
@@ -942,8 +1192,14 @@ async function renderPlayerGamercard(searchParams) {
                         <div class="pill-row">
                           <strong>${esc(b.title)}</strong>
                           ${renderTierBadge(b.tier)}
+                          ${b.countsTowardCompletion === false ? '<span class="badge">Bonus</span>' : ''}
+                          ${b.repeatable && Number(b.repeatCount) > 1 ? `<span class="badge badge-accent">&times;${Number(b.repeatCount)}</span>` : ''}
                         </div>
                         <p class="muted-text" style="margin-block-end: 0.35rem;">${esc(b.description)}</p>
+                        ${contextSummary ? `<div class="muted-text" style="margin-block-end: 0.3rem;"><em>${esc(contextSummary)}</em></div>` : ''}
+                        ${b.note ? `<div class="muted-text" style="margin-block-end: 0.3rem;">&ldquo;${esc(b.note)}&rdquo;</div>` : ''}
+                        ${coOpStr ? `<div class="muted-text" style="margin-block-end: 0.3rem;">With: ${coOpStr}</div>` : ''}
+                        ${b.mediaUrl ? `<img src="${esc(b.mediaUrl)}" alt="${esc(b.mediaAlt || b.title)}" class="unlock-media-thumb" loading="lazy">` : ''}
                         <div class="pill-row" style="justify-content: space-between;">
                           <span class="muted-text">${formatTime(b.unlockedAt)}</span>
                           <button type="button" class="proof-chip verified" data-proof-uri="${esc(b.unlockUri)}">Proof</button>
@@ -951,7 +1207,8 @@ async function renderPlayerGamercard(searchParams) {
                       </div>
                     </div>
                   </li>
-                `
+                `;
+                  }
                 )
                 .join('')}
             </ul>
@@ -1054,6 +1311,20 @@ async function renderPlayerGamercard(searchParams) {
     </section>
 
     ${standingsHtml}
+
+    ${
+      Array.isArray(data.recentMatches) && data.recentMatches.length > 0
+        ? `
+          <section class="section-block">
+            <div class="section-header">
+              <h2>Recent Verified Matches</h2>
+              <span class="muted-text"><code>games.opengaming.match.result</code></span>
+            </div>
+            ${renderMatchListHtml(data.recentMatches)}
+          </section>
+        `
+        : ''
+    }
 
     <section class="section-block">
       <div class="section-header">
@@ -1197,7 +1468,7 @@ async function renderDevelopers() {
       <div>
         <h1 id="view-heading" tabindex="-1">Open Gaming Lexicons &amp; XRPC Endpoints</h1>
         <p class="muted-text">
-          9 self-contained AT Protocol Lexicon v1 schemas under <code>games.opengaming.*</code> (designed for 1:1 adoption into the ATmosphere Gaming Working Group namespace).
+          11 self-contained AT Protocol Lexicon v1 schemas under <code>games.opengaming.*</code> (designed for 1:1 adoption into the ATmosphere Gaming Working Group namespace).
         </p>
       </div>
     </div>
@@ -1206,21 +1477,27 @@ async function renderDevelopers() {
       <h2>Schema Design Highlights</h2>
       <ul class="cards-grid" role="list">
         <li class="card">
-          <h3>Spoiler-Proof Hidden Stubs + ATProto Spaces</h3>
+          <h3>Spoiler-Proof Hidden Stubs, DLC &amp; Unlock Memories</h3>
           <p class="muted-text">
-            <code>achievement.definition</code> allows omitting <code>title</code>, <code>description</code>, and <code>icon</code> when <code>hidden: true</code>, preventing Firehose/PDS spoiler leaks while pointing to an access-controlled <code>hiddenSpace</code> URI revealed upon unlock.
+            <code>achievement.definition</code> supports redacted <code>hidden: true</code> stubs + <code>hiddenSpace</code>, non-penalizing DLC/jam badges (<code>countsTowardCompletion: false</code>), and <code>repeatable</code> accolades; <code>achievement.unlock</code> supports commemorative <code>media</code> blobs, <code>note</code>, and open-union <code>#unlockContext</code> (RPG Hall-of-Fame party/build snapshots).
           </p>
         </li>
         <li class="card">
-          <h3>Forward-Compatible Component Maps &amp; Open Unions</h3>
+          <h3>Local Component Maps, Sub-Board Dimensions &amp; Obsolete PBs</h3>
           <p class="muted-text">
-            Multi-component leaderboards use a dictionary <code>components</code> map (<code>$keyFormat</code>/<code>$valueType</code> convention + <code>componentOrder</code>) positioned for zero-migration adoption of the proposed Lexicon <code>map</code> type—without breaking PDS records or DAG-CBOR attestation CIDs—plus open-union <code>details</code> (<code>#judgmentBreakdown</code>).
+            Component schemas live locally inside <code>leaderboard.definition</code> &amp; <code>leaderboard.score</code> (<code>#points</code>, <code>#percentage</code>, <code>#time</code>, <code>#enum</code>, <code>#text</code>) with sub-board <code>dimensions</code> (4K/7K, character/difficulty) and speedrun.com-style <code>personalBests</code> + <code>includeObsolete</code> PB history.
           </p>
         </li>
         <li class="card">
-          <h3>Legal Chart / Build Hashes (<code>rankedVersions</code>)</h3>
+          <h3>Co-op Squads, Daily Challenges &amp; P2P Co-Signed PvP</h3>
           <p class="muted-text">
-            Leaderboards declare legal chart/patch hashes via <code>rankedVersions</code>; <code>getScores</code> filters active rankings by <code>version</code> while keeping historical pre-patch scores intact in players' PDSs.
+            Co-op/raid runs share a <code>runId</code> and <code>participants</code> list deduplicated into a single leaderboard rank; <code>challenge.definition</code> powers daily seeds &amp; rotating quests; <code>match.result</code> verifies both server-attested ladders and serverless P2P multi-participant DID co-signatures.
+          </p>
+        </li>
+        <li class="card">
+          <h3>Legal Chart / Build Hashes (<code>rankedVersions</code>) &amp; i18n</h3>
+          <p class="muted-text">
+            Leaderboards declare legal chart/patch hashes via <code>rankedVersions</code> so <code>getScores</code> filters active rankings without deleting pre-patch PDS history, and definitions include optional BCP-47 <code>translations</code> maps.
           </p>
         </li>
         <li class="card">
@@ -1360,6 +1637,17 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id === 'leaderboard-select') {
     navigateTo(`/leaderboards?leaderboard=${encodeURIComponent(e.target.value)}`);
+    return;
+  }
+
+  if (e.target.id === 'lb-include-obsolete') {
+    const next = new URLSearchParams(e.target.getAttribute('data-base-query') || '');
+    if (e.target.checked) {
+      next.set('includeObsolete', 'true');
+    } else {
+      next.delete('includeObsolete');
+    }
+    navigateTo(`/leaderboards?${next.toString()}`);
   }
 });
 
@@ -1387,12 +1675,20 @@ document.addEventListener('submit', (e) => {
     const timeframe = e.target.getAttribute('data-timeframe') || 'allTime';
     const scope = e.target.getAttribute('data-scope') || 'social';
     const sortBy = e.target.getAttribute('data-sort-by') || '';
+    const dimensions = e.target.getAttribute('data-dimensions') || '';
     const version = e.target.getAttribute('data-version') || '';
+    const includeObsolete = e.target.getAttribute('data-include-obsolete') === 'true';
     const viewer = document.getElementById('lb-viewer-input')?.value.trim() || '';
+    const player = document.getElementById('lb-player-input')?.value.trim() || '';
+    const seed = document.getElementById('lb-seed-input')?.value.trim() || '';
     const next = new URLSearchParams({ leaderboard: lbUri, timeframe, scope });
     if (viewer) next.set('viewer', viewer);
+    if (player) next.set('player', player);
+    if (seed) next.set('seed', seed);
     if (sortBy) next.set('sortBy', sortBy);
+    if (dimensions) next.set('dimensions', dimensions);
     if (version) next.set('version', version);
+    if (includeObsolete) next.set('includeObsolete', 'true');
     navigateTo(`/leaderboards?${next.toString()}`);
   }
 });

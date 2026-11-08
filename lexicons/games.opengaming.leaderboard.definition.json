@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Defines one leaderboard offered by a game. Supports both simple single-integer arcade/speedrun boards (`scoreFormat` + `sortOrder`) AND rich multi-component boards (`components` + `defaultComponent`, e.g. Points + Time + Grade + Clear Lamp), legal chart/patch version filtering (`rankedVersions`), and multi-issuer post-EoS federation (`trustedIssuers`).",
+      "description": "Defines one leaderboard offered by a game. Supports simple single-integer arcade/speedrun boards (`scoreFormat` + `sortOrder`), local multi-component schemas (`#points`, `#percentage`, `#time`, `#enum`, `#text`), parameterized sub-board `dimensions` (modes, input methods, speedrun variables, characters), peak vs live Elo `rankingMode`, bounded event/jam windows (`startsAt` / `endsAt`), localized `translations`, `rankedVersions`, and `trustedIssuers`.",
       "key": "any",
       "record": {
         "type": "object",
@@ -20,13 +20,18 @@
             "type": "string",
             "maxGraphemes": 100,
             "maxLength": 300,
-            "description": "Display name of the leaderboard (e.g. `High Scores`, `Fastest Clear`, ` Freedom Dive [FOUR DIMENSIONS]`)."
+            "description": "Display name of the leaderboard (e.g. `High Scores`, `Fastest Clear`, `Freedom Dive [FOUR DIMENSIONS]`)."
           },
           "description": {
             "type": "string",
             "maxGraphemes": 500,
             "maxLength": 1500,
             "description": "Optional explanation of what this leaderboard tracks and any rules."
+          },
+          "translations": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#translationMap",
+            "description": "Optional localized `name` and `description` strings keyed by BCP-47 language tag (e.g. `ja`, `ja-Latn`, `ko`)."
           },
           "icon": {
             "type": "blob",
@@ -45,7 +50,14 @@
             "maxLength": 32,
             "knownValues": ["largerIsBetter", "smallerIsBetter"],
             "default": "largerIsBetter",
-            "description": "Primary ranking direction for single-metric boards (`largerIsBetter` for points; `smallerIsBetter` for speedruns)."
+            "description": "Primary ranking direction for single-metric boards (`largerIsBetter` for points/Elo; `smallerIsBetter` for speedruns)."
+          },
+          "rankingMode": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["best", "latest"],
+            "default": "best",
+            "description": "Controls how AppViews pick each player's active standing: `best` ranks by their peak historical metric; `latest` ranks by their most recent `recordedAt` entry (for fluctuating Elo/Glicko-2 MMR ladders or active win-streaks)."
           },
           "scoreFormat": {
             "type": "ref",
@@ -54,8 +66,8 @@
           },
           "components": {
             "type": "ref",
-            "ref": "games.opengaming.defs#scoreComponentDefMap",
-            "description": "Optional dictionary map of component key (`record-key`, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to typed component definition (`#pointsComponentDef`, `#percentageComponentDef`, `#timeComponentDef`, `#enumComponentDef`, `#textComponentDef`). Forward-compatible with the proposed Lexicon `map` type."
+            "ref": "#componentMap",
+            "description": "Optional dictionary map of component key (`record-key`, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to local typed component definition (`#points`, `#percentage`, `#time`, `#enum`, `#text`). Forward-compatible with the proposed Lexicon `map` type."
           },
           "componentOrder": {
             "type": "array",
@@ -73,6 +85,22 @@
             "format": "record-key",
             "maxLength": 32,
             "description": "Key in `components` used as the default ranking column when `components` is present."
+          },
+          "dimensions": {
+            "type": "ref",
+            "ref": "#dimensionMap",
+            "description": "Optional dictionary map of filterable sub-board category variables (e.g. `mode`, `inputMethod`, `character`, `rules`, `seeded`) avoiding combinatorial leaderboard proliferation."
+          },
+          "dimensionOrder": {
+            "type": "array",
+            "minLength": 1,
+            "maxLength": 16,
+            "description": "Optional explicit display order of dimension keys in `dimensions`.",
+            "items": {
+              "type": "string",
+              "format": "record-key",
+              "maxLength": 32
+            }
           },
           "detailsSchema": {
             "type": "string",
@@ -100,19 +128,29 @@
           "timeframes": {
             "type": "array",
             "minLength": 1,
-            "maxLength": 3,
-            "description": "Which leaderboard time windows this game tracks and displays for this board (`daily`, `weekly`, `allTime`).",
+            "maxLength": 8,
+            "description": "Which leaderboard time windows this game tracks and displays for this board (`daily`, `weekly`, `monthly`, `allTime`).",
             "items": {
               "type": "string",
               "maxLength": 32,
-              "knownValues": ["daily", "weekly", "allTime"]
+              "knownValues": ["daily", "weekly", "monthly", "allTime"]
             }
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional opening timestamp for bounded Game Jam contests, weekend tournaments, or seasonal ladders."
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional closing cutoff timestamp for bounded Game Jam contests, weekend tournaments, or seasonal ladders."
           },
           "recordPolicy": {
             "type": "string",
             "maxLength": 32,
-            "knownValues": ["bestOnly", "perWindowBest", "everyRun"],
-            "description": "Controls how player `leaderboard.score` records are written: `bestOnly`, `perWindowBest`, or `everyRun`."
+            "knownValues": ["overwriteBest", "personalBests", "perWindowBest", "everyRun"],
+            "description": "Client PDS write cadence: `overwriteBest` overwrites a single deterministic `rkey` (minimal PDS footprint, zero history); `personalBests` appends a new record whenever the player sets a PB on any sortable component (retaining superseded runs in PDS for `includeObsolete`); `perWindowBest` writes at most one PB per beat in `timeframes`; `everyRun` logs every completed run."
           },
           "scoreMin": {
             "type": "integer",
@@ -137,6 +175,230 @@
             "format": "datetime",
             "description": "Timestamp when this leaderboard definition was last updated."
           }
+        }
+      }
+    },
+    "points": {
+      "type": "object",
+      "description": "Defines an integer points/count component on a multi-component leaderboard (e.g. EX Score, Points, Collectibles, Max Combo).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "largerIsBetter"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        },
+        "unitSingular": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128
+        },
+        "unitPlural": {
+          "type": "string",
+          "maxGraphemes": 32,
+          "maxLength": 128
+        }
+      }
+    },
+    "percentage": {
+      "type": "object",
+      "description": "Defines a fixed-point percentage accuracy/completion component. Values are stored as integers scaled by `10^precision` (e.g. `precision: 2` and value `9942` displays as `99.42%`).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "largerIsBetter"
+        },
+        "precision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 2,
+          "description": "Number of decimal places implied on the integer value."
+        },
+        "minimum": {
+          "type": "integer",
+          "description": "Minimum valid scaled integer value (e.g. `0`)."
+        },
+        "maximum": {
+          "type": "integer",
+          "description": "Maximum valid scaled integer value (e.g. `10000` for `100.00%`, or `10100` for `101.00%`)."
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "description": "Defines an elapsed-time or survival-time component on a multi-component leaderboard.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "smallerIsBetter"
+        },
+        "timeUnit": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["milliseconds", "seconds"],
+          "default": "milliseconds"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        }
+      }
+    },
+    "enum": {
+      "type": "object",
+      "description": "Defines an ordered categorical component such as rhythm-game clear lamps (`ALL PERFECT`, `FULL COMBO`, `CLEAR`) or letter grades (`S`, `A`, `B`, `C`).",
+      "required": ["name", "values"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "sortOrder": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["largerIsBetter", "smallerIsBetter"],
+          "default": "smallerIsBetter",
+          "description": "By default (`smallerIsBetter`), earlier entries in `values` (index 0) rank higher."
+        },
+        "values": {
+          "type": "array",
+          "minLength": 1,
+          "maxLength": 64,
+          "items": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#option"
+          }
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "description": "Defines a display-only text metadata component (e.g. build summary or modifier string).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "maxGraphemes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 64
+        }
+      }
+    },
+    "componentMap": {
+      "type": "object",
+      "description": "Dictionary map of component key (`record-key` format, 1..32 chars, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to local typed component definition (`#points`, `#percentage`, `#time`, `#enum`, `#text`). Uses the forward-compatible `$keyFormat`/`$valueType` Lexicon `map` convention.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "union",
+          "refs": [
+            "#points",
+            "#percentage",
+            "#time",
+            "#enum",
+            "#text"
+          ],
+          "closed": false,
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "dimension": {
+      "type": "object",
+      "description": "Defines a filterable sub-board category variable (such as rhythm `mode` or `inputMethod`, speedrun `category` or `character`, or roguelike `stake`).",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Human-readable label for this dimension (e.g. `Mode`, `Input Method`, `Character`, `Ruleset`)."
+        },
+        "values": {
+          "type": "array",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Allowed option tokens (`id` + `name`). When omitted or `allowCustomValues: true`, arbitrary string tokens (`<= 256` chars) are accepted.",
+          "items": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#option"
+          }
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "When `true`, every score submitted to this leaderboard must include a value for this dimension key."
+        },
+        "allowCustomValues": {
+          "type": "boolean",
+          "default": false,
+          "description": "When `true`, scores may supply values outside the predefined `values` list (useful for modded characters or open seeds)."
+        },
+        "defaultValue": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Optional default option `id` pre-selected when viewing rankings without an explicit filter."
+        }
+      }
+    },
+    "dimensionMap": {
+      "type": "object",
+      "description": "Dictionary map of dimension key (`record-key` format, 1..32 chars, e.g. `mode`, `inputMethod`, `character`) to `#dimension` definition.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "ref",
+          "ref": "#dimension",
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
         }
       }
     }

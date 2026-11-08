@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.revocation",
-  "description": "Published in a game's own repository to revoke compromised, exploited, or mistakenly signed achievement unlocks or leaderboard scores.",
+  "description": "Published in a game's own repository to revoke compromised, exploited, or mistakenly signed achievement unlocks, leaderboard scores, or match results.",
   "defs": {
     "main": {
       "type": "record",
@@ -14,8 +14,8 @@
           "scope": {
             "type": "string",
             "maxLength": 32,
-            "knownValues": ["attestation", "achievement", "leaderboard", "game"],
-            "description": "`attestation` revokes a single signed payload identified by `attestationCid`; `achievement`, `leaderboard`, or `game` revokes all signed records for `player` matching `subject` (optionally bounded by `before`)."
+            "knownValues": ["attestation", "achievement", "leaderboard", "match", "challenge", "game"],
+            "description": "`attestation` revokes a single signed payload identified by `attestationCid`; `achievement`, `leaderboard`, `match`, `challenge`, or `game` revokes all signed records for `player` matching `subject` (optionally bounded by `before`)."
           },
           "attestationCid": {
             "type": "string",
@@ -30,17 +30,17 @@
           "subject": {
             "type": "string",
             "format": "at-uri",
-            "description": "AT-URI of the `achievement.definition`, `leaderboard.definition`, or `games.atmosphere.define` record in this publisher's repository to which the revocation applies."
+            "description": "AT-URI of the `achievement.definition`, `leaderboard.definition`, `challenge.definition`, or `games.atmosphere.define` record in this publisher's repository to which the revocation applies."
           },
           "recordUri": {
             "type": "string",
             "format": "at-uri",
-            "description": "Optional AT-URI of the offending `achievement.unlock` or `leaderboard.score` record observed in the player's repository, preserved for auditability."
+            "description": "Optional AT-URI of the offending `achievement.unlock`, `leaderboard.score`, or `match.result` record observed in the player's repository, preserved for auditability."
           },
           "before": {
             "type": "string",
             "format": "datetime",
-            "description": "Optional cutoff timestamp for `achievement`, `leaderboard`, or `game` scopes. Note: for non-adversarial chart or balance updates, prefer `leaderboard.definition#rankedVersions` so historical runs stay preserved rather than revoked."
+            "description": "Optional cutoff timestamp for `achievement`, `leaderboard`, `match`, `challenge`, or `game` scopes. Note: for non-adversarial chart or balance updates, prefer `leaderboard.definition#rankedVersions` so historical runs stay preserved rather than revoked."
           },
           "reason": {
             "type": "string",

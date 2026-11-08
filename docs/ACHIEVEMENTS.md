@@ -14,7 +14,7 @@ Open Gaming intentionally **omits XP / gamerscore point values** and **places no
 
 - **Zero Clout-Chasing or Shovelware Inflation**: Without cross-game XP totals, games have no incentive to pad out trivial point-farming achievements, and AppViews need no arbitrary clamping formulas.
 - **Freedom of Game Design**: Minimalist jam games with 3 handcrafted achievements and sprawling RPGs with 500+ milestones are both first-class citizens.
-- **Rich Per-Game Signals**: Appreciation comes from custom artwork (`icon`), author-chosen trophy tiers (`bronze | silver | gold | platinum`), per-game completion progress (`unlockedCount / totalAchievements` and `100%` Perfect Game showcases), and global unlock rarity (`unlockedPlayers / totalPlayers` computed by AppViews).
+- **Rich Per-Game Signals**: Appreciation comes from custom artwork (`icon`), author-chosen trophy tiers (`bronze | silver | gold | platinum`), per-game completion progress (`unlockedCount / totalAchievements`, `bonusUnlockedCount`, and `100%` Perfect Game showcases), and global unlock rarity (`unlockedPlayers / totalPlayers` computed by AppViews).
 
 ---
 
@@ -33,32 +33,34 @@ Published in the game publisher's own PDS (`key: "any"`, using a stable slug `rk
 ### Spoiler-Proof Hidden Achievements & ATProto Spaces (`hidden: true` + `hiddenSpace`)
 Because public PDS repositories and Firehose/Jetstream streams can be inspected directly (e.g. on `pds.ls`), Open Gaming supports **two tiers of hidden achievements**:
 
-1. **Casual UI Masking (`hidden: true` with `title`/`description`)**: Compliant AppViews mask `title`, `description`, `requirement`, and `icon` until unlocked by the viewing player. Suitable for lighthearted easter eggs where PDS inspection is harmless.
+1. **Casual UI Masking (`hidden: true` with `title`/`description`)**: Compliant AppViews mask `title`, `description`, `requirement`, and `icon` until unlocked by the viewing player.
 2. **Cryptographically Spoiler-Proof Stubs (`hidden: true` omitting `title`, `description`, and `icon` + `hiddenSpace`)**:
    - The public PDS record contains **only** `game`, `hidden: true`, optional `lockedIcon`, `tier`, `listOrder`, `hiddenSpace`, and `createdAt` — leaking zero narrative spoilers prior to or after launch.
-   - `hiddenSpace` (`uri`) points to an access-controlled **ATProto Space** (or authenticated reveal endpoint) holding the real title, description, and artwork. When the game server signs an `achievement.unlock` for a player, it simultaneously grants that player's DID read membership to `hiddenSpace` (and post-launch/post-embargo, the publisher can optionally populate the public definition so public trophy cabinets render without extra fetches).
+   - `hiddenSpace` (`uri`) points to an access-controlled **ATProto Space** (or authenticated reveal endpoint) holding the real title, description, and artwork.
+
+### Non-Penalizing DLC, Seasonal & Game Jam Badges (`countsTowardCompletion`, `repeatable`, Availability Windows)
+- `countsTowardCompletion` (`boolean`, default `true`): When `false`, marks the achievement as a **Bonus / DLC / Feat of Strength** milestone. It is excluded from base-game `totalAchievements` and `100%` `completed` calculations so post-launch DLC or time-limited Game Jam badges never revoke existing players' `100%` status, while still surfacing in `actor.getProfile` under `bonusUnlockedCount` and `totalUnlocks`.
+- `repeatable` (`boolean`, default `false`): Allows a player to earn an accolade multiple times (e.g. seasonal mastery, Prestige resets, multi-class clears) using timestamped/TID `rkey`s (`getUnlockRecordPlan`).
+- `availableFrom` / `availableUntil` (`datetime`) & `retired` (`boolean`): Communicates time-limited or sunsetted achievements cleanly.
+- `translations` (`games.opengaming.defs#translationMap`): Optional BCP-47 locale map (`ja`, `es`, `pt-BR`) overriding `title`, `description`, and `requirement` (`resolveTranslation` in `@opengaming/sdk`).
 
 ### Additional Optional Fields
-- `requirement` (`string`): Imperative hint shown *before* unlock (e.g. `"Collect 100 likes cumulatively"`) when `description` uses past tense.
-- `iconAlt` (`string`) & `lockedIcon` (`blob`): Accessibility text and optional custom locked silhouette icon.
-- `tier` (`"bronze" | "silver" | "gold" | "platinum"`): Author-intended trophy tier for within-game milestone prestige.
-- `trustedIssuers` (`did[]`): Additional DIDs (federated servers, tournament hosts, or post-EoS community revival servers) authorized to issue `#attestations` signatures for this achievement alongside the definition's repository owner.
-- `stepsNeeded` (`integer`, `>= 2`): Marks the achievement as **Incremental**, enabling progress bars (`42 / 100`).
-- `group` (`string`), `listOrder` (`integer`), `badge` (`at-uri` to `community.lexicon.badge.definition`), `updatedAt` (`datetime`).
+- `requirement` (`string`), `iconAlt` (`string`), `lockedIcon` (`blob`), `tier` (`"bronze" | "silver" | "gold" | "platinum"`), `trustedIssuers` (`did[]`), `stepsNeeded` (`integer`, `>= 2`), `group` (`string`), `listOrder` (`integer`), `badge` (`at-uri`), `updatedAt` (`datetime`).
 
 ---
 
 ## 3. Symmetric `definitionCid` vs. `strongRef`
 
-Across `achievement.unlock`, `achievement.progress`, and `leaderboard.score`, the target definition is referenced via a plain `at-uri` (`achievement` or `leaderboard`) paired with an **optional** `definitionCid` (`cid`) rather than a mandatory `com.atproto.repo.strongRef`:
-
-- **Why decoupled**: Game developers routinely fix typos, add translations, refresh badge art, or unredact a `hidden` stub after an embargo lifts. If player records mandated a strict `strongRef`, any benign edit to the definition on the Game's PDS would change its CID and orphan or split earlier unlocks/progress.
-- **Historical provenance when desired**: Publishers or clients that want an immutable snapshot of the exact definition revision at the moment of unlock/progress/score can populate `definitionCid`.
+Across `achievement.unlock`, `achievement.progress`, and `leaderboard.score`, the target definition is referenced via a plain `at-uri` paired with an **optional** `definitionCid` (`cid`) rather than a mandatory `com.atproto.repo.strongRef`, so benign edits (typos, translations, unredacting a `hidden` stub) never orphan earlier awards while preserving optional snapshot provenance.
 
 ---
 
-## 4. Unlock Receipts, Incremental Progress & Gamercards
+## 4. Rich Unlock Memories, Co-op Unlocks & Gamercards (`games.opengaming.achievement.unlock`)
 
-- **`games.opengaming.achievement.unlock`**: Stored in the player's PDS using deterministic `getUnlockRkey(achievementUri)` to prevent duplicate unlocks. Contains `achievement` (`at-uri`), optional `definitionCid`, optional `game`, `player` (`did`), `unlockedAt`, optional `stepsCompleted`, and optional `signatures[]`.
-- **`games.opengaming.achievement.progress`**: Optional record updated in place (`getUnlockRkey(achievementUri)`) to sync partial incremental progress (`currentSteps` toward `stepsNeeded`, plus optional `definitionCid` and `signatures[]`) before final unlock.
-- **`games.opengaming.actor.getProfile`**: Aggregates a player's verified, non-revoked achievements per game (`unlockedCount`, uncapped `totalAchievements`, floored `completionPercent`, `completed`, `latestUnlockAt`), `gamesPlayed`, `completedGames`, `totalUnlocks`, and `tiers`.
+- **Deterministic vs. Repeatable `rkey`**: Non-repeatable achievements use `getUnlockRkey(achievementUri)` (`putRecord` idempotency); `repeatable: true` definitions use `createRecord` (`getUnlockRecordPlan` in `@opengaming/sdk`).
+- **RPG Hall-of-Fame & Narrative Memories**:
+  - `details` (`open union`, built-in `games.opengaming.defs#unlockContext`): Captures `summary`, `playtimeMs`, `seed`, `loadout` (`string[]`, e.g. party/deck/relics), and `attributes` (`stringMap`, e.g. `{ character: "Paladin", ending: "Starlight" }`), or any custom game `$type`.
+  - `media` (`blob`, <= 2 MB, `image/png | image/jpeg | image/webp`) + `mediaAlt`: Optional commemorative unlock screenshot, photo-mode card, or clear certificate stored in the player's PDS.
+  - `note` (`string`, <= 300 graphemes): Optional player reflection or caption.
+- **Co-op / Raid Unlocks**: `participants` (`games.opengaming.defs#participant[]`) + `runId` credit the full party or raid group that earned the achievement together.
+- **`games.opengaming.actor.getProfile`**: Aggregates verified, non-revoked achievements per game (`unlockedCount`, core `totalAchievements`, `bonusUnlockedCount`, floored `completionPercent`, `completed`, `latestUnlockAt`), `gamesPlayed`, `completedGames`, `totalUnlocks`, and `tiers`.

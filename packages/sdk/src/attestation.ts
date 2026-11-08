@@ -14,10 +14,14 @@ import type {
   BlobRef,
   InlineSignature,
   LeaderboardScoreRecord,
+  MatchResultRecord,
+  Participant,
   RevocationRecord,
   RevocationWithOrigin,
   ScoreComponentValMap,
   ScoreDetails,
+  StringMap,
+  UnlockDetails,
   VerificationResult,
 } from './types.js';
 
@@ -75,7 +79,7 @@ function assertNoUndefined(value: unknown, path = 'record'): void {
 /**
  * Normalize CBOR-unsafe or optional undefined fields cleanly before encoding.
  */
-function stripUndefinedShallow<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
+export function stripUndefinedShallow<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== undefined) {
@@ -129,7 +133,7 @@ export async function computeAttestationCid({
 }
 
 /**
- * Sign any Open Gaming record (unlock, progress, or score) using Mode A inline attestation.
+ * Sign any Open Gaming record (unlock, progress, score, or match result) using Mode A inline attestation.
  * Returns the `InlineSignature` object and computed `attestationCid` string.
  */
 export async function createInlineSignature({
@@ -195,6 +199,12 @@ export async function createSignedUnlock({
   game,
   definitionCid,
   stepsCompleted,
+  participants,
+  runId,
+  details,
+  media,
+  mediaAlt,
+  note,
   unlockedAt = new Date().toISOString(),
   rkey,
   keyId,
@@ -206,6 +216,12 @@ export async function createSignedUnlock({
   game?: string;
   definitionCid?: string;
   stepsCompleted?: number;
+  participants?: Participant[];
+  runId?: string;
+  details?: UnlockDetails;
+  media?: BlobRef;
+  mediaAlt?: string;
+  note?: string;
   unlockedAt?: string;
   rkey?: string;
   keyId?: string;
@@ -218,6 +234,12 @@ export async function createSignedUnlock({
     player: playerDid,
     unlockedAt,
     stepsCompleted,
+    participants,
+    runId,
+    details,
+    media,
+    mediaAlt,
+    note,
   }) as unknown as AchievementUnlockRecord;
 
   const { signature, attestationCid } = await createInlineSignature({
@@ -302,13 +324,17 @@ function inferHeadlineScoreFromComponents(components?: ScoreComponentValMap): nu
 
 /**
  * Build and cryptographically sign a `games.opengaming.leaderboard.score` record for a player.
- * Supports single-integer `score`, multi-component `components` maps, genre `details`, `version`
- * hashes, and `replay` blobs.
+ * Supports single-integer `score`, local multi-component `components` maps, sub-board `dimensions`,
+ * `seed`, co-op `participants` + `runId`, genre `details`, `version` hashes, and `replay` blobs.
  */
 export async function createSignedScore({
   leaderboard,
   score,
   components,
+  dimensions,
+  seed,
+  participants,
+  runId,
   details,
   version,
   replay,
@@ -326,6 +352,10 @@ export async function createSignedScore({
   leaderboard: string;
   score?: number;
   components?: ScoreComponentValMap;
+  dimensions?: StringMap;
+  seed?: string;
+  participants?: Participant[];
+  runId?: string;
   details?: ScoreDetails;
   version?: string;
   replay?: BlobRef;
@@ -359,6 +389,10 @@ export async function createSignedScore({
     score: effectiveScore,
     displayScore,
     components,
+    dimensions,
+    seed,
+    participants,
+    runId,
     details,
     version,
     replay,
@@ -382,20 +416,20 @@ export async function createSignedScore({
   };
 }
 
-function extractIssuerFromAtUri(atUri?: string): string | undefined {
+export function extractIssuerFromAtUri(atUri?: string): string | undefined {
   if (!atUri || !atUri.startsWith('at://')) return undefined;
   const host = atUri.slice('at://'.length).split('/')[0];
   return host?.startsWith('did:') ? host : undefined;
 }
 
-function extractRkeyFromAtUri(atUri?: string): string | undefined {
+export function extractRkeyFromAtUri(atUri?: string): string | undefined {
   if (!atUri || !atUri.startsWith('at://')) return undefined;
   const parts = atUri.slice('at://'.length).split('/');
   if (parts.length < 3) return undefined;
   return parts.slice(2).join('/') || undefined;
 }
 
-function extractSignatureBytes(sigField: InlineSignature['signature']): Uint8Array {
+export function extractSignatureBytes(sigField: InlineSignature['signature']): Uint8Array {
   if (sigField instanceof Uint8Array) {
     return sigField;
   }
@@ -408,7 +442,7 @@ function extractSignatureBytes(sigField: InlineSignature['signature']): Uint8Arr
   throw new Error('Malformed signature field');
 }
 
-function extractDidKeyFromDidDoc(didDoc: Record<string, unknown>, issuerDid: string, keyId: string): string | undefined {
+export function extractDidKeyFromDidDoc(didDoc: Record<string, unknown>, issuerDid: string, keyId: string): string | undefined {
   const fragment = keyId.includes('#') ? `#${keyId.split('#')[1]}` : ATTESTATION_KEY_FRAGMENT;
   const bareFragment = fragment.slice(1);
 
@@ -435,9 +469,9 @@ function extractDidKeyFromDidDoc(didDoc: Record<string, unknown>, issuerDid: str
 
 /**
  * Verify a Mode A inline-signed Open Gaming record (`achievement.unlock`, `achievement.progress`,
- * or `leaderboard.score`), supporting multi-issuer post-EoS federation (`trustedIssuerDids` /
- * `allowAnyValidIssuer`), `rkey` binding, publisher `games.opengaming.revocation` records, and
- * ATProto Labeler moderation (`activeLabels`).
+ * `leaderboard.score`, or publisher-signed `match.result`), supporting multi-issuer post-EoS
+ * federation (`trustedIssuerDids` / `allowAnyValidIssuer`), `rkey` binding, publisher
+ * `games.opengaming.revocation` records, and ATProto Labeler moderation (`activeLabels`).
  */
 export async function verifyRecordAttestation({
   record,
@@ -456,7 +490,12 @@ export async function verifyRecordAttestation({
   plcDirectoryUrl,
   resolveDidDoc,
 }: {
-  record: AchievementUnlockRecord | AchievementProgressRecord | LeaderboardScoreRecord | Record<string, unknown>;
+  record:
+    | AchievementUnlockRecord
+    | AchievementProgressRecord
+    | LeaderboardScoreRecord
+    | MatchResultRecord
+    | Record<string, unknown>;
   playerDid: string;
   recordUri?: string;
   recordCid?: string;
@@ -514,7 +553,11 @@ export async function verifyRecordAttestation({
       ? rec.achievement
       : typeof rec.leaderboard === 'string'
         ? rec.leaderboard
-        : undefined;
+        : typeof rec.challenge === 'string'
+          ? rec.challenge
+          : typeof rec.game === 'string'
+            ? rec.game
+            : undefined;
   const definitionPublisherDid = expectedIssuerDid ?? extractIssuerFromAtUri(targetUri);
 
   const allowedIssuers = new Set<string>();

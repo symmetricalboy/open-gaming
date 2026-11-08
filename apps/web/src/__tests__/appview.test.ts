@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import {
   NSIDS,
+  coSignMatchResult,
   createOpenGamingLexicons,
   createRevocationRecord,
+  createSignedMatchResult,
   createSignedScore,
   createSignedUnlock,
   generateSigningKeys,
@@ -482,7 +484,7 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
         icon: blobStub,
         components: {
           accuracy: {
-            $type: 'games.opengaming.defs#percentageComponentDef',
+            $type: 'games.opengaming.leaderboard.definition#percentage',
             name: 'Accuracy',
             sortOrder: 'largerIsBetter',
             precision: 2,
@@ -490,7 +492,7 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
             maximum: 10000,
           },
           'ex-score': {
-            $type: 'games.opengaming.defs#pointsComponentDef',
+            $type: 'games.opengaming.leaderboard.definition#points',
             name: 'EX Score',
             sortOrder: 'largerIsBetter',
             minimum: 0,
@@ -498,7 +500,7 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
             unitPlural: 'EX',
           },
           'clear-time': {
-            $type: 'games.opengaming.defs#timeComponentDef',
+            $type: 'games.opengaming.leaderboard.definition#time',
             name: 'Clear Time',
             sortOrder: 'smallerIsBetter',
             timeUnit: 'milliseconds',
@@ -522,9 +524,9 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
       issuerDid: rhythmStudioDid,
       rkey: 'run-a1',
       components: {
-        'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 3200 },
-        accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9910 },
-        'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 95000 },
+        'ex-score': { $type: 'games.opengaming.leaderboard.score#points', value: 3200 },
+        accuracy: { $type: 'games.opengaming.leaderboard.score#percentage', value: 9910 },
+        'clear-time': { $type: 'games.opengaming.leaderboard.score#time', value: 95000 },
       },
       version: 'md5:chart-v2-legal',
       replay: replayStub,
@@ -541,9 +543,9 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
       issuerDid: revivalHostDid,
       rkey: 'run-b1',
       components: {
-        'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 2950 },
-        accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9750 },
-        'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 82000 },
+        'ex-score': { $type: 'games.opengaming.leaderboard.score#points', value: 2950 },
+        accuracy: { $type: 'games.opengaming.leaderboard.score#percentage', value: 9750 },
+        'clear-time': { $type: 'games.opengaming.leaderboard.score#time', value: 82000 },
       },
       version: 'md5:chart-v2-legal',
       signingKey: revivalKeys.keypair,
@@ -559,9 +561,9 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
       issuerDid: rhythmStudioDid,
       rkey: 'run-a-old',
       components: {
-        'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 4900 },
-        accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9999 },
-        'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 70000 },
+        'ex-score': { $type: 'games.opengaming.leaderboard.score#points', value: 4900 },
+        accuracy: { $type: 'games.opengaming.leaderboard.score#percentage', value: 9999 },
+        'clear-time': { $type: 'games.opengaming.leaderboard.score#time', value: 70000 },
       },
       version: 'md5:chart-v1-old',
       signingKey: studioKeys.keypair,
@@ -658,9 +660,9 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
         leaderboard: chartLbUri,
         game: gameUri,
         components: {
-          'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 3450 },
-          accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9985 },
-          'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 88000 },
+          'ex-score': { $type: 'games.opengaming.leaderboard.score#points', value: 3450 },
+          accuracy: { $type: 'games.opengaming.leaderboard.score#percentage', value: 9985 },
+          'clear-time': { $type: 'games.opengaming.leaderboard.score#time', value: 88000 },
         },
         version: 'md5:chart-v2-legal',
         replay: replayStub,
@@ -684,5 +686,408 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
     assert.equal(withEos.entries[0].player, playerEosDid);
     assert.equal(withEos.entries[0].score, 3450);
     assert.deepEqual(withEos.entries[0].labels, ['verified-replay']);
+  });
+
+  it('supports v0.2 PB obsolete history, sub-board dimensions & seeds, rankingMode: latest, co-op runId dedup, bonus badges, challenges, and P2P co-signed match.result', async () => {
+    const lex = createOpenGamingLexicons();
+    const v2StudioDid = 'did:plc:v2studiotest00000001';
+    const aliceDid = 'did:plc:v2aliceplayer0000001';
+    const bobDid = 'did:plc:v2bobplayer000000002';
+
+    const studioKeys = await generateSigningKeys();
+    const aliceKeys = await generateSigningKeys();
+    const bobKeys = await generateSigningKeys();
+
+    app.identity.upsertActor({
+      did: v2StudioDid,
+      handle: 'v2studio.opengaming.games',
+      didDoc: {
+        id: v2StudioDid,
+        verificationMethods: { attestations: studioKeys.publicDidKey },
+      },
+    });
+    app.identity.upsertActor({
+      did: aliceDid,
+      handle: 'alice.v2.test',
+      didDoc: {
+        id: aliceDid,
+        verificationMethods: { attestations: aliceKeys.publicDidKey },
+      },
+    });
+    app.identity.upsertActor({
+      did: bobDid,
+      handle: 'bob.v2.test',
+      didDoc: {
+        id: bobDid,
+        verificationMethods: { attestations: bobKeys.publicDidKey },
+      },
+    });
+
+    const gameUri = `at://${v2StudioDid}/games.atmosphere.define/aether-raids`;
+    const coreAchUri = `at://${v2StudioDid}/${NSIDS.AchievementDefinition}/clear-act-1`;
+    const jamFeatUri = `at://${v2StudioDid}/${NSIDS.AchievementDefinition}/jam-2026-founder`;
+    const speedLbUri = `at://${v2StudioDid}/${NSIDS.LeaderboardDefinition}/speedrun-board`;
+    const eloLbUri = `at://${v2StudioDid}/${NSIDS.LeaderboardDefinition}/duel-elo`;
+    const challengeUri = `at://${v2StudioDid}/${NSIDS.ChallengeDefinition}/daily-2026-11-08`;
+    const blobStub = {
+      $type: 'blob' as const,
+      ref: { $link: 'bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori' },
+      mimeType: 'image/png',
+      size: 1024,
+    };
+
+    await app.indexer.indexRecord({
+      uri: gameUri,
+      record: {
+        $type: 'games.atmosphere.define',
+        name: 'Aether Raids',
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    // Core achievement + non-penalizing Jam Feat of Strength (`countsTowardCompletion: false`)
+    await app.indexer.indexRecord({
+      uri: coreAchUri,
+      record: {
+        $type: NSIDS.AchievementDefinition,
+        game: gameUri,
+        title: 'Clear Act I',
+        description: 'Defeat the Sentinel of Dawn.',
+        icon: blobStub,
+        tier: 'gold',
+        countsTowardCompletion: true,
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    await app.indexer.indexRecord({
+      uri: jamFeatUri,
+      record: {
+        $type: NSIDS.AchievementDefinition,
+        game: gameUri,
+        title: 'ATProto Game Jam 2026 Founder',
+        description: 'Played during the November 2026 ATProto Game Jam.',
+        icon: blobStub,
+        tier: 'platinum',
+        countsTowardCompletion: false,
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    // Alice unlocks BOTH core + bonus achievement with `#unlockContext`, `note`, and co-op `participants`; Bob unlocks ONLY core -> BOTH have 100% completion!
+    const { record: aliceCoreUnlock } = await createSignedUnlock({
+      achievement: coreAchUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      participants: [
+        { did: aliceDid, role: 'paladin' },
+        { did: bobDid, role: 'cleric' },
+      ],
+      runId: 'raid-clear-001',
+      details: {
+        $type: 'games.opengaming.defs#unlockContext',
+        summary: 'Zero-death duo clear',
+        attributes: {
+          character: 'Aegis Paladin',
+          difficulty: 'Mythic',
+        },
+      },
+      media: blobStub,
+      mediaAlt: 'Victory screenshot in the Sunspire',
+      note: 'What a clutch heal from Bob!',
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({
+      uri: `at://${aliceDid}/${NSIDS.AchievementUnlock}/clear-act-1`,
+      record: aliceCoreUnlock,
+    });
+
+    const { record: aliceJamUnlock } = await createSignedUnlock({
+      achievement: jamFeatUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({
+      uri: `at://${aliceDid}/${NSIDS.AchievementUnlock}/jam-2026`,
+      record: aliceJamUnlock,
+    });
+
+    const { record: bobCoreUnlock } = await createSignedUnlock({
+      achievement: coreAchUri,
+      game: gameUri,
+      playerDid: bobDid,
+      issuerDid: v2StudioDid,
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({
+      uri: `at://${bobDid}/${NSIDS.AchievementUnlock}/clear-act-1`,
+      record: bobCoreUnlock,
+    });
+
+    const aliceProfRes = await fetch(`${baseUrl}/xrpc/games.opengaming.actor.getProfile?actor=alice.v2.test`);
+    const aliceProf = (await aliceProfRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.ActorGetProfile, aliceProf);
+    assert.equal(aliceProf.games[0].totalAchievements, 1);
+    assert.equal(aliceProf.games[0].unlockedCount, 1);
+    assert.equal(aliceProf.games[0].bonusUnlockedCount, 1);
+    assert.equal(aliceProf.games[0].completed, true);
+
+    const bobProfRes = await fetch(`${baseUrl}/xrpc/games.opengaming.actor.getProfile?actor=bob.v2.test`);
+    const bobProf = (await bobProfRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.ActorGetProfile, bobProf);
+    assert.equal(bobProf.games[0].completed, true);
+
+    // Speedrun leaderboard with `personalBests`, sub-board `dimensions`, and co-op `runId`
+    await app.indexer.indexRecord({
+      uri: speedLbUri,
+      record: {
+        $type: NSIDS.LeaderboardDefinition,
+        game: gameUri,
+        name: 'Sunspire Speedrun',
+        icon: blobStub,
+        sortOrder: 'smallerIsBetter',
+        scoreFormat: { kind: 'time', timeUnit: 'milliseconds', decimalPlaces: 2 },
+        dimensions: {
+          mode: {
+            name: 'Party Mode',
+            values: [
+              { id: 'solo', name: 'Solo' },
+              { id: 'duo', name: 'Duo Co-op' },
+            ],
+          },
+        },
+        dimensionOrder: ['mode'],
+        timeframes: ['allTime', 'monthly'],
+        recordPolicy: 'personalBests',
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    // Alice records a 95s solo PB, then beats it with an 80s solo PB (`personalBests` keeps both in PDS)
+    const { record: pb1 } = await createSignedScore({
+      leaderboard: speedLbUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      rkey: 'pb-1',
+      score: 95000,
+      dimensions: { mode: 'solo' },
+      seed: '2026-11-08',
+      recordedAt: '2026-11-08T01:00:00.000Z',
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({ uri: `at://${aliceDid}/${NSIDS.LeaderboardScore}/pb-1`, record: pb1 });
+
+    const { record: pb2 } = await createSignedScore({
+      leaderboard: speedLbUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      rkey: 'pb-2',
+      score: 80000,
+      dimensions: { mode: 'solo' },
+      seed: '2026-11-08',
+      recordedAt: '2026-11-08T02:00:00.000Z',
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({ uri: `at://${aliceDid}/${NSIDS.LeaderboardScore}/pb-2`, record: pb2 });
+
+    // Invalid dimension value is rejected by indexer!
+    const { record: badDimScore } = await createSignedScore({
+      leaderboard: speedLbUri,
+      game: gameUri,
+      playerDid: bobDid,
+      issuerDid: v2StudioDid,
+      rkey: 'bad-dim',
+      score: 50000,
+      dimensions: { mode: 'trio-illegal' },
+      signingKey: studioKeys.keypair,
+    });
+    const badDimIdx = await app.indexer.indexRecord({
+      uri: `at://${bobDid}/${NSIDS.LeaderboardScore}/bad-dim`,
+      record: badDimScore,
+    });
+    assert.equal(badDimIdx.verified, false);
+
+    // Alice & Bob complete a 72s Duo Co-op run and BOTH store the receipt with `runId: "duo-run-77"`
+    const duoParticipants = [
+      { did: aliceDid, role: 'paladin' },
+      { did: bobDid, role: 'cleric' },
+    ];
+    for (const repoDid of [aliceDid, bobDid]) {
+      const { record: duoScore } = await createSignedScore({
+        leaderboard: speedLbUri,
+        game: gameUri,
+        playerDid: repoDid,
+        issuerDid: v2StudioDid,
+        rkey: 'duo-77',
+        score: 72000,
+        dimensions: { mode: 'duo' },
+        participants: duoParticipants,
+        runId: 'duo-run-77',
+        recordedAt: '2026-11-08T03:00:00.000Z',
+        signingKey: studioKeys.keypair,
+      });
+      await app.indexer.indexRecord({ uri: `at://${repoDid}/${NSIDS.LeaderboardScore}/duo-77`, record: duoScore });
+    }
+
+    // Check solo sub-board active vs `includeObsolete=true`
+    const soloActiveRes = await fetch(
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(speedLbUri)}&dimensions=mode%3Dsolo&seed=2026-11-08`
+    );
+    const soloActive = (await soloActiveRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.LeaderboardGetScores, soloActive);
+    assert.equal(soloActive.entries.length, 1);
+    assert.equal(soloActive.entries[0].score, 80000);
+    assert.equal(soloActive.entries[0].obsolete, undefined);
+
+    const soloHistoryRes = await fetch(
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(speedLbUri)}&dimensions=mode%3Dsolo&player=alice.v2.test&includeObsolete=true`
+    );
+    const soloHistory = (await soloHistoryRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.LeaderboardGetScores, soloHistory);
+    assert.equal(soloHistory.entries.length, 2);
+    assert.equal(soloHistory.entries[0].score, 80000);
+    assert.equal(soloHistory.entries[0].obsolete, undefined);
+    assert.equal(soloHistory.entries[1].score, 95000);
+    assert.equal(soloHistory.entries[1].obsolete, true);
+
+    // Check duo sub-board: deduplicated by `runId` into a single rank!
+    const duoRes = await fetch(
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(speedLbUri)}&dimensions=mode%3Dduo`
+    );
+    const duoBoard = (await duoRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.LeaderboardGetScores, duoBoard);
+    assert.equal(duoBoard.entries.length, 1);
+    assert.equal(duoBoard.entries[0].runId, 'duo-run-77');
+    assert.equal(duoBoard.entries[0].participants.length, 2);
+
+    // Elo ladder with `rankingMode: 'latest'` (latest rating 1520 replaces older peak 1600!)
+    await app.indexer.indexRecord({
+      uri: eloLbUri,
+      record: {
+        $type: NSIDS.LeaderboardDefinition,
+        game: gameUri,
+        name: '1v1 Duel Elo Ladder',
+        icon: blobStub,
+        sortOrder: 'largerIsBetter',
+        rankingMode: 'latest',
+        scoreFormat: { kind: 'numeric', decimalPlaces: 0, unitPlural: 'Elo' },
+        timeframes: ['allTime'],
+        recordPolicy: 'everyRun',
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    const { record: eloPeak } = await createSignedScore({
+      leaderboard: eloLbUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      rkey: 'elo-1',
+      score: 1600,
+      recordedAt: '2026-11-08T01:00:00.000Z',
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({ uri: `at://${aliceDid}/${NSIDS.LeaderboardScore}/elo-1`, record: eloPeak });
+
+    const { record: eloLatest } = await createSignedScore({
+      leaderboard: eloLbUri,
+      game: gameUri,
+      playerDid: aliceDid,
+      issuerDid: v2StudioDid,
+      rkey: 'elo-2',
+      score: 1520,
+      recordedAt: '2026-11-08T04:00:00.000Z',
+      signingKey: studioKeys.keypair,
+    });
+    await app.indexer.indexRecord({ uri: `at://${aliceDid}/${NSIDS.LeaderboardScore}/elo-2`, record: eloLatest });
+
+    const eloRes = await fetch(
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(eloLbUri)}`
+    );
+    const eloBoard = (await eloRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.LeaderboardGetScores, eloBoard);
+    assert.equal(eloBoard.rankingMode, 'latest');
+    assert.equal(eloBoard.entries.length, 1);
+    assert.equal(eloBoard.entries[0].score, 1520);
+
+    // Challenge definition + Serverless P2P Multi-Participant Co-Signed `match.result`
+    await app.indexer.indexRecord({
+      uri: challengeUri,
+      record: {
+        $type: NSIDS.ChallengeDefinition,
+        game: gameUri,
+        title: 'Daily Sunspire Sprint',
+        cadence: 'daily',
+        seed: '2026-11-08',
+        leaderboard: speedLbUri,
+        dimensions: { mode: 'solo' },
+        createdAt: '2026-11-08T00:00:00.000Z',
+      },
+    });
+
+    const { record: halfSignedMatch } = await createSignedMatchResult({
+      game: gameUri,
+      matchId: 'p2p-duel-1',
+      mode: '1v1-ranked',
+      leaderboard: eloLbUri,
+      participants: [
+        { did: aliceDid, outcome: 'win', score: 3, ratingBefore: 1520, ratingAfter: 1536 },
+        { did: bobDid, outcome: 'loss', score: 1, ratingBefore: 1500, ratingAfter: 1484 },
+      ],
+      playedAt: '2026-11-08T05:00:00.000Z',
+      repositoryDid: aliceDid,
+      issuerDid: aliceDid,
+      rkey: 'duel-1',
+      signingKey: aliceKeys.keypair,
+    });
+
+    // 1-sided P2P claim (missing Bob's co-signature) MUST be rejected!
+    const oneSidedIdx = await app.indexer.indexRecord({
+      uri: `at://${aliceDid}/${NSIDS.MatchResult}/duel-1`,
+      record: halfSignedMatch,
+    });
+    assert.equal(oneSidedIdx.verified, false);
+
+    // Bob co-signs with his own DID key -> verified as `multi-participant`!
+    const { record: fullySignedMatch } = await coSignMatchResult({
+      record: halfSignedMatch,
+      repositoryDid: aliceDid,
+      signerDid: bobDid,
+      rkey: 'duel-1',
+      signingKey: bobKeys.keypair,
+    });
+    const fullMatchUri = `at://${aliceDid}/${NSIDS.MatchResult}/duel-1`;
+    const fullMatchIdx = await app.indexer.indexRecord({
+      uri: fullMatchUri,
+      record: fullySignedMatch,
+    });
+    assert.equal(fullMatchIdx.verified, true);
+
+    const matchProofRes = await fetch(`${baseUrl}/api/proof?uri=${encodeURIComponent(fullMatchUri)}`);
+    const matchProof = (await matchProofRes.json()) as Record<string, any>;
+    assert.equal(matchProof.kind, 'match.result');
+    assert.equal(matchProof.verified, true);
+    assert.equal(matchProof.verificationMethod, 'multi-participant');
+    assert.deepEqual(matchProof.coSigners.sort(), [aliceDid, bobDid].sort());
+
+    const v2GameHubRes = await fetch(`${baseUrl}/api/game?uri=${encodeURIComponent(gameUri)}`);
+    const v2GameHub = (await v2GameHubRes.json()) as Record<string, any>;
+    assert.equal(v2GameHub.challenges.length, 1);
+    assert.equal(v2GameHub.challenges[0].seed, '2026-11-08');
+    assert.equal(v2GameHub.recentMatches.length, 1);
+    assert.equal(v2GameHub.recentMatches[0].verificationMethod, 'multi-participant');
+
+    const v2AliceCardRes = await fetch(`${baseUrl}/api/actor?actor=alice.v2.test`);
+    const v2AliceCard = (await v2AliceCardRes.json()) as Record<string, any>;
+    assert.equal(v2AliceCard.recentMatches.length, 1);
+    const coreBadge = v2AliceCard.games[0].unlockedBadges.find((b: any) => b.achievementUri === coreAchUri);
+    assert.equal(coreBadge.note, 'What a clutch heal from Bob!');
+    assert.equal(coreBadge.details.attributes.character, 'Aegis Paladin');
+    assert.equal(coreBadge.participants.length, 2);
   });
 });

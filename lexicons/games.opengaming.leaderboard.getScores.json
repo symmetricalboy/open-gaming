@@ -1,11 +1,11 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.leaderboard.getScores",
-  "description": "Query ranked leaderboard entries by timeframe, scope, component column, and legal chart/build version.",
+  "description": "Query ranked leaderboard entries by timeframe, scope, component column, sub-board dimensions, seed, player history, and obsolete-run visibility.",
   "defs": {
     "main": {
       "type": "query",
-      "description": "Returns ranked entries for a `games.opengaming.leaderboard.definition`, filtered by timeframe, `rankedVersions`, cryptographic verification (or post-EoS open mode), publisher `games.opengaming.revocation` records, ATProto moderation labels, and social graph.",
+      "description": "Returns ranked entries for a `games.opengaming.leaderboard.definition`, supporting speedrun.com-style obsolete PB toggles (`includeObsolete`), single-player progression queries (`player`), sub-board `dimensions` and `seed` filters, `rankingMode` (`best` vs `latest`), co-op `runId` deduplication, `rankedVersions`, `games.opengaming.revocation`, and ATProto moderation labels.",
       "parameters": {
         "type": "params",
         "required": ["leaderboard"],
@@ -17,7 +17,7 @@
           },
           "timeframe": {
             "type": "string",
-            "knownValues": ["allTime", "weekly", "daily"],
+            "knownValues": ["allTime", "monthly", "weekly", "daily"],
             "default": "allTime",
             "description": "Time window derived from `recordedAt` (must be one of the definition's `timeframes`)."
           },
@@ -32,11 +32,31 @@
             "format": "did",
             "description": "Optional viewer DID used to compute `social` scope and return `viewerEntry`."
           },
+          "player": {
+            "type": "string",
+            "format": "at-identifier",
+            "description": "Optional player handle or DID filter. Combine with `includeObsolete=true` to retrieve a player's full PB progression history on this board."
+          },
+          "includeObsolete": {
+            "type": "boolean",
+            "default": false,
+            "description": "When `false` (default), returns only each player's (or co-op team's) active best/latest run for the requested `sortBy` and filters. When `true`, also includes superseded historical runs marked with `obsolete: true`."
+          },
           "sortBy": {
             "type": "string",
             "format": "record-key",
             "maxLength": 32,
             "description": "Optional component key from `leaderboard.definition#components` to sort rankings by (defaults to `defaultComponent` or headline `score`)."
+          },
+          "dimensions": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Optional sub-board dimension filter serialized as `key=value,key2=value2` (e.g. `mode=4k,inputMethod=keyboard`) or a JSON string map."
+          },
+          "seed": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional daily puzzle ID or procedural seed filter (e.g. `2026-11-08`)."
           },
           "version": {
             "type": "string",
@@ -74,6 +94,12 @@
               "maxLength": 32,
               "description": "Component key used to rank entries when the leaderboard defines `components`."
             },
+            "rankingMode": {
+              "type": "string",
+              "maxLength": 32,
+              "knownValues": ["best", "latest"],
+              "description": "Ranking selection mode applied (`best` or `latest`)."
+            },
             "entries": {
               "type": "array",
               "items": {
@@ -84,7 +110,7 @@
             "viewerEntry": {
               "type": "ref",
               "ref": "#scoreEntry",
-              "description": "The `viewer`'s own best non-revoked entry in the requested timeframe, if any."
+              "description": "The `viewer`'s own active non-revoked entry in the requested timeframe/filter, if any."
             },
             "cursor": {
               "type": "string"
@@ -132,7 +158,27 @@
         },
         "components": {
           "type": "ref",
-          "ref": "games.opengaming.defs#scoreComponentValMap"
+          "ref": "games.opengaming.leaderboard.score#componentMap"
+        },
+        "dimensions": {
+          "type": "ref",
+          "ref": "games.opengaming.defs#stringMap"
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "participants": {
+          "type": "array",
+          "maxLength": 32,
+          "items": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#participant"
+          }
+        },
+        "runId": {
+          "type": "string",
+          "maxLength": 128
         },
         "version": {
           "type": "string",
@@ -164,6 +210,10 @@
         "verified": {
           "type": "boolean",
           "description": "True if verified by a trusted `#attestations` DID key (or community `verified-replay` label) AND neither publisher-revoked nor invalidated by moderation labels."
+        },
+        "obsolete": {
+          "type": "boolean",
+          "description": "True when this run has been superseded by a better (or newer, under `rankingMode: \"latest\"`) run from the same player/team and is returned because `includeObsolete=true`."
         },
         "revoked": {
           "type": "boolean",

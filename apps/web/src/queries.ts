@@ -2,10 +2,14 @@ import {
   formatComponentValue,
   formatScore,
   getOrderedComponentIds,
+  getOrderedDimensionIds,
   getScoreSortMetric,
   getTimeframeStartMs,
   isBetterScore,
   isVersionLegal,
+  isWithinLeaderboardWindow,
+  matchesDimensionFilter,
+  parseDimensionsFilter,
   resolveActiveLabels,
   sortAchievementDefinitions,
   summarizeActorProfile,
@@ -16,8 +20,12 @@ import {
   type LeaderboardDefinitionRecord,
   type LeaderboardScoreRecord,
   type LeaderboardSortOrder,
+  type MatchParticipant,
+  type Participant,
+  type RankingMode,
   type ScoreComponentValMap,
   type ScoreFormat,
+  type StringMap,
   type Timeframe,
 } from '@opengaming/sdk';
 import type { AppDatabase } from './db.js';
@@ -33,6 +41,10 @@ export interface XrpcScoreEntry {
   score: number;
   displayScore?: string;
   components?: ScoreComponentValMap;
+  dimensions?: StringMap;
+  seed?: string;
+  participants?: Participant[];
+  runId?: string;
   version?: string;
   hasReplay?: boolean;
   replayCid?: string;
@@ -40,6 +52,7 @@ export interface XrpcScoreEntry {
   labels?: string[];
   recordedAt: string;
   verified: boolean;
+  obsolete?: boolean;
   revoked?: boolean;
 }
 
@@ -108,7 +121,11 @@ export class AppViewQueries {
     timeframe = 'allTime',
     scope = 'public',
     viewer,
+    player,
+    includeObsolete = false,
     sortBy,
+    dimensions,
+    seed,
     version,
     verifiedOnly = true,
     limit = 25,
@@ -119,7 +136,11 @@ export class AppViewQueries {
     timeframe?: Timeframe;
     scope?: 'public' | 'social';
     viewer?: string;
+    player?: string;
+    includeObsolete?: boolean;
     sortBy?: string;
+    dimensions?: string;
+    seed?: string;
     version?: string;
     verifiedOnly?: boolean;
     limit?: number;
@@ -128,6 +149,7 @@ export class AppViewQueries {
   }): Promise<{
     leaderboard: string;
     sortedBy?: string;
+    rankingMode?: RankingMode;
     entries: XrpcScoreEntry[];
     viewerEntry?: XrpcScoreEntry;
     cursor?: string;
@@ -143,13 +165,14 @@ export class AppViewQueries {
     const parsedDef = JSON.parse(String(lbRow.raw_json)) as LeaderboardDefinitionRecord;
     const orderedCompIds = getOrderedComponentIds(parsedDef);
     const hasComponents = orderedCompIds.length > 0;
+    const rankingMode: RankingMode = parsedDef.rankingMode === 'latest' ? 'latest' : 'best';
 
     if (sortBy && hasComponents) {
       const requestedComp = parsedDef.components?.[sortBy];
       if (!requestedComp) {
         throw Object.assign(new Error(`Unknown leaderboard component \`sortBy\`: ${sortBy}`), { status: 400 });
       }
-      if (requestedComp.$type === 'games.opengaming.defs#textComponentDef') {
+      if (requestedComp.$type === 'games.opengaming.leaderboard.definition#text') {
         throw Object.assign(new Error(`Text component \`${sortBy}\` cannot be used for ranking.`), { status: 400 });
       }
     }
@@ -166,11 +189,27 @@ export class AppViewQueries {
     const fallbackSortOrder = String(lbRow.sort_order) as LeaderboardSortOrder;
     const scoreFormat = JSON.parse(String(lbRow.score_format_json)) as ScoreFormat;
     const windowStartMs = getTimeframeStartMs(effectiveTimeframe, now);
+    const parsedDimFilter = parseDimensionsFilter(dimensions);
+    const hasDimFilter = Object.keys(parsedDimFilter).length > 0;
 
     let resolvedViewerDid: string | undefined;
     if (viewer) {
       const resolvedViewer = await this.identity.resolveActor(viewer);
       resolvedViewerDid = resolvedViewer?.did ?? (viewer.startsWith('did:') ? viewer : undefined);
+    }
+
+    let resolvedPlayerDid: string | undefined;
+    if (player) {
+      const resolvedPlayer = await this.identity.resolveActor(player);
+      resolvedPlayerDid = resolvedPlayer?.did ?? (player.startsWith('did:') ? player : undefined);
+      if (!resolvedPlayerDid) {
+        return {
+          leaderboard,
+          ...(effectiveSortedBy ? { sortedBy: effectiveSortedBy } : {}),
+          rankingMode,
+          entries: [],
+        };
+      }
     }
 
     let socialDids: Set<string> | null = null;
@@ -185,96 +224,183 @@ export class AppViewQueries {
       .prepare('SELECT * FROM leaderboard_scores WHERE leaderboard_uri = ?')
       .all(leaderboard) as Array<Record<string, any>>;
 
-    // Filter by timeframe, verification/revocation, version legality, and social graph
-    const eligible = rawRows.filter((r) => {
-      const ts = Date.parse(String(r.recorded_at));
-      if (!Number.isNaN(ts) && ts < windowStartMs) return false;
-      if (verifiedOnly && (Number(r.verified) !== 1 || Number(r.revoked) === 1)) return false;
-      if (socialDids && !socialDids.has(String(r.player_did))) return false;
-
-      const rowVersion = r.version ? String(r.version) : undefined;
-      if (version) {
-        if (rowVersion !== version) return false;
-      } else if (parsedDef.rankedVersions && parsedDef.rankedVersions.length > 0) {
-        if (!isVersionLegal(rowVersion, parsedDef.rankedVersions)) return false;
-      }
-      return true;
-    });
-
     interface RowWithMetric {
       row: Record<string, any>;
       sortableValue: number;
       sortOrder: LeaderboardSortOrder;
       displayScore: string;
       components?: ScoreComponentValMap;
+      dimensions?: StringMap;
+      seed?: string;
+      participants?: Participant[];
+      runId?: string;
+      competitorKey: string;
+      obsolete?: boolean;
     }
 
+    const rowIncludesDid = (playerDid: string, participants: Participant[] | undefined, targetDid: string) =>
+      playerDid === targetDid || Boolean(participants?.some((p) => p?.did === targetDid));
+
+    // Filter by timeframe, bounded contest window, verification/revocation, version legality, dimensions, seed, and social graph
     const extractedRows: RowWithMetric[] = [];
-    for (const row of eligible) {
+    for (const r of rawRows) {
+      const recordedAt = String(r.recorded_at);
+      const ts = Date.parse(recordedAt);
+      if (!Number.isNaN(ts) && ts < windowStartMs) continue;
+      if (!isWithinLeaderboardWindow(recordedAt, parsedDef)) continue;
+      if (verifiedOnly && (Number(r.verified) !== 1 || Number(r.revoked) === 1)) continue;
+
+      const rowDimensions: StringMap | undefined = r.dimensions_json
+        ? (JSON.parse(String(r.dimensions_json)) as StringMap)
+        : undefined;
+      if (hasDimFilter && !matchesDimensionFilter(rowDimensions, parsedDimFilter)) continue;
+
+      const rowSeed = r.seed ? String(r.seed) : undefined;
+      if (seed !== undefined && rowSeed !== seed) continue;
+
+      const rowVersion = r.version ? String(r.version) : undefined;
+      if (version) {
+        if (rowVersion !== version) continue;
+      } else if (parsedDef.rankedVersions && parsedDef.rankedVersions.length > 0) {
+        if (!isVersionLegal(rowVersion, parsedDef.rankedVersions)) continue;
+      }
+
+      const participants: Participant[] | undefined = r.participants_json
+        ? (JSON.parse(String(r.participants_json)) as Participant[])
+        : undefined;
+      const playerDid = String(r.player_did);
+
+      if (socialDids) {
+        const inSocial =
+          socialDids.has(playerDid) || Boolean(participants?.some((p) => p?.did && socialDids!.has(p.did)));
+        if (!inSocial) continue;
+      }
+
+      const runId = r.run_id ? String(r.run_id) : undefined;
+      const partyKeys =
+        participants && participants.length >= 2
+          ? [...new Set(participants.map((p) => p.did || p.name || '').filter(Boolean))].sort()
+          : [];
+      const competitorKey = partyKeys.length >= 2 ? `party:${partyKeys.join('+')}` : `player:${playerDid}`;
+
       if (hasComponents) {
-        const scoreRec = JSON.parse(String(row.raw_json)) as LeaderboardScoreRecord;
+        const scoreRec = JSON.parse(String(r.raw_json)) as LeaderboardScoreRecord;
         const metric = getScoreSortMetric(scoreRec, parsedDef, effectiveSortedBy);
         if (!metric) continue;
         extractedRows.push({
-          row,
+          row: r,
           sortableValue: Math.trunc(metric.sortableValue),
           sortOrder: metric.sortOrder,
           displayScore: metric.displayValue,
           components: scoreRec.components,
+          dimensions: rowDimensions,
+          seed: rowSeed,
+          participants,
+          runId,
+          competitorKey,
         });
       } else {
-        const rawScore = Math.trunc(Number(row.score));
-        const displayScore = row.display_score
-          ? String(row.display_score)
+        const rawScore = Math.trunc(Number(r.score));
+        const displayScore = r.display_score
+          ? String(r.display_score)
           : formatScore(rawScore, scoreFormat);
         extractedRows.push({
-          row,
+          row: r,
           sortableValue: rawScore,
           sortOrder: fallbackSortOrder,
           displayScore,
-          components: row.components_json
-            ? (JSON.parse(String(row.components_json)) as ScoreComponentValMap)
+          components: r.components_json
+            ? (JSON.parse(String(r.components_json)) as ScoreComponentValMap)
             : undefined,
+          dimensions: rowDimensions,
+          seed: rowSeed,
+          participants,
+          runId,
+          competitorKey,
         });
       }
     }
 
-    // Deduplicate to each player's best score within the timeframe (tie-break by earliest recorded_at)
-    const bestByPlayer = new Map<string, RowWithMetric>();
+    // 1. Co-op `runId` deduplication: multiple squadmates publishing the same `runId` collapse to 1 shared entry
+    const dedupedByRunId: RowWithMetric[] = [];
+    const seenRunIds = new Map<string, number>();
+    const preferredDid = resolvedPlayerDid ?? resolvedViewerDid;
     for (const item of extractedRows) {
-      const playerDid = String(item.row.player_did);
-      const prev = bestByPlayer.get(playerDid);
-      if (!prev) {
-        bestByPlayer.set(playerDid, item);
+      if (!item.runId) {
+        dedupedByRunId.push(item);
         continue;
       }
-      if (isBetterScore(item.sortableValue, prev.sortableValue, item.sortOrder)) {
-        bestByPlayer.set(playerDid, item);
-      } else if (
-        item.sortableValue === prev.sortableValue &&
-        Date.parse(String(item.row.recorded_at)) < Date.parse(String(prev.row.recorded_at))
-      ) {
-        bestByPlayer.set(playerDid, item);
+      const existingIdx = seenRunIds.get(item.runId);
+      if (existingIdx === undefined) {
+        seenRunIds.set(item.runId, dedupedByRunId.length);
+        dedupedByRunId.push(item);
+      } else {
+        const prev = dedupedByRunId[existingIdx];
+        const itemPreferred = preferredDid && String(item.row.player_did) === preferredDid;
+        const prevPreferred = preferredDid && String(prev.row.player_did) === preferredDid;
+        if (
+          (itemPreferred && !prevPreferred) ||
+          (!prevPreferred && String(item.row.uri).localeCompare(String(prev.row.uri)) < 0)
+        ) {
+          dedupedByRunId[existingIdx] = item;
+        }
       }
     }
 
-    const sortedItems = [...bestByPlayer.values()].sort((a, b) => {
+    // 2. Identify each competitor's active entry (`rankingMode: 'best' | 'latest'`) and mark superseded runs `obsolete: true`
+    const isSuperseding = (candidate: RowWithMetric, incumbent: RowWithMetric): boolean => {
+      const candTs = Date.parse(String(candidate.row.recorded_at));
+      const incTs = Date.parse(String(incumbent.row.recorded_at));
+      if (rankingMode === 'latest') {
+        if (candTs !== incTs) return candTs > incTs;
+        if (candidate.sortableValue !== incumbent.sortableValue) {
+          return isBetterScore(candidate.sortableValue, incumbent.sortableValue, candidate.sortOrder);
+        }
+        return String(candidate.row.uri).localeCompare(String(incumbent.row.uri)) < 0;
+      }
+      if (isBetterScore(candidate.sortableValue, incumbent.sortableValue, candidate.sortOrder)) {
+        return true;
+      }
+      if (candidate.sortableValue === incumbent.sortableValue) {
+        if (candTs !== incTs) return candTs < incTs;
+        return String(candidate.row.uri).localeCompare(String(incumbent.row.uri)) < 0;
+      }
+      return false;
+    };
+
+    const activeByCompetitor = new Map<string, RowWithMetric>();
+    for (const item of dedupedByRunId) {
+      const prev = activeByCompetitor.get(item.competitorKey);
+      if (!prev || isSuperseding(item, prev)) {
+        activeByCompetitor.set(item.competitorKey, item);
+      }
+    }
+
+    const activeUris = new Set([...activeByCompetitor.values()].map((i) => String(i.row.uri)));
+    for (const item of dedupedByRunId) {
+      item.obsolete = !activeUris.has(String(item.row.uri));
+    }
+
+    const compareEntries = (a: RowWithMetric, b: RowWithMetric): number => {
       if (a.sortableValue !== b.sortableValue) {
         return a.sortOrder === 'smallerIsBetter'
           ? a.sortableValue - b.sortableValue
           : b.sortableValue - a.sortableValue;
       }
-      return Date.parse(String(a.row.recorded_at)) - Date.parse(String(b.row.recorded_at));
-    });
+      const tsDiff = Date.parse(String(a.row.recorded_at)) - Date.parse(String(b.row.recorded_at));
+      if (tsDiff !== 0) return rankingMode === 'latest' ? -tsDiff : tsDiff;
+      return String(a.row.uri).localeCompare(String(b.row.uri));
+    };
 
-    const rankedEntries: XrpcScoreEntry[] = sortedItems.map(({ row, sortableValue, displayScore, components }, idx) => {
+    const toScoreEntry = (item: RowWithMetric, rank: number): XrpcScoreEntry => {
+      const { row, sortableValue, displayScore, components, dimensions: dims, seed: rowSeed, participants, runId } = item;
       const actor = this.getActorMeta(String(row.player_did));
       const labels: string[] = row.active_labels_json ? JSON.parse(String(row.active_labels_json)) : [];
       const issuer = row.issuer_did && String(row.issuer_did).startsWith('did:') ? String(row.issuer_did) : undefined;
       const replayCid = row.replay_cid ? String(row.replay_cid) : undefined;
 
       return {
-        rank: idx + 1,
+        rank,
         player: actor.did,
         ...(actor.handle ? { handle: actor.handle } : {}),
         uri: String(row.uri),
@@ -283,14 +409,51 @@ export class AppViewQueries {
         score: sortableValue,
         displayScore,
         ...(components && !Array.isArray(components) && Object.keys(components).length > 0 ? { components } : {}),
+        ...(dims && Object.keys(dims).length > 0 ? { dimensions: dims } : {}),
+        ...(rowSeed ? { seed: rowSeed } : {}),
+        ...(participants && participants.length > 0 ? { participants } : {}),
+        ...(runId ? { runId } : {}),
         ...(row.version ? { version: String(row.version) } : {}),
         ...(replayCid ? { hasReplay: true, replayCid } : {}),
         ...(row.tag ? { tag: String(row.tag) } : {}),
         ...(labels.length > 0 ? { labels } : {}),
         recordedAt: String(row.recorded_at),
         verified: Number(row.verified) === 1 && Number(row.revoked) === 0,
+        ...(item.obsolete ? { obsolete: true } : {}),
         ...(!verifiedOnly ? { revoked: Number(row.revoked) === 1 } : {}),
       };
+    };
+
+    // Compute true competitive standings across all active (`!obsolete`) entries first (for `viewerEntry` & active ranks)
+    const sortedActiveAll = [...activeByCompetitor.values()].sort(compareEntries);
+    const activeRankByUri = new Map<string, number>();
+    sortedActiveAll.forEach((item, idx) => activeRankByUri.set(String(item.row.uri), idx + 1));
+
+    let viewerEntry: XrpcScoreEntry | undefined;
+    if (resolvedViewerDid) {
+      const viewerActive = sortedActiveAll.find(
+        (item) =>
+          Number(item.row.revoked) === 0 &&
+          rowIncludesDid(String(item.row.player_did), item.participants, resolvedViewerDid!)
+      );
+      if (viewerActive) {
+        viewerEntry = toScoreEntry(viewerActive, activeRankByUri.get(String(viewerActive.row.uri)) ?? 1);
+      }
+    }
+
+    let pool = includeObsolete ? dedupedByRunId : sortedActiveAll;
+    if (resolvedPlayerDid) {
+      pool = pool.filter((item) =>
+        rowIncludesDid(String(item.row.player_did), item.participants, resolvedPlayerDid!)
+      );
+    }
+
+    const sortedItems = [...pool].sort(compareEntries);
+    const rankedEntries: XrpcScoreEntry[] = sortedItems.map((item, idx) => {
+      const standingRank = !includeObsolete && !resolvedPlayerDid
+        ? idx + 1
+        : activeRankByUri.get(String(item.row.uri)) ?? idx + 1;
+      return toScoreEntry(item, standingRank);
     });
 
     const offset = cursor ? Math.max(0, Number.parseInt(cursor, 10) || 0) : 0;
@@ -298,13 +461,10 @@ export class AppViewQueries {
     const page = rankedEntries.slice(offset, offset + boundedLimit);
     const nextCursor = offset + boundedLimit < rankedEntries.length ? String(offset + boundedLimit) : undefined;
 
-    const viewerEntry = resolvedViewerDid
-      ? rankedEntries.find((e) => e.player === resolvedViewerDid && !e.revoked)
-      : undefined;
-
     return {
       leaderboard,
       ...(effectiveSortedBy ? { sortedBy: effectiveSortedBy } : {}),
+      rankingMode,
       entries: page,
       ...(viewerEntry ? { viewerEntry } : {}),
       ...(nextCursor ? { cursor: nextCursor } : {}),
@@ -319,7 +479,11 @@ export class AppViewQueries {
     timeframe = 'allTime',
     scope = 'public',
     viewer,
+    player,
+    includeObsolete = false,
     sortBy,
+    dimensions,
+    seed,
     version,
     limit = 50,
   }: {
@@ -327,7 +491,11 @@ export class AppViewQueries {
     timeframe?: Timeframe;
     scope?: 'public' | 'social';
     viewer?: string;
+    player?: string;
+    includeObsolete?: boolean;
     sortBy?: string;
+    dimensions?: string;
+    seed?: string;
     version?: string;
     limit?: number;
   }) {
@@ -340,6 +508,7 @@ export class AppViewQueries {
 
     const parsedDef = JSON.parse(String(lbRow.raw_json)) as LeaderboardDefinitionRecord;
     const orderedCompIds = getOrderedComponentIds(parsedDef);
+    const orderedDimIds = getOrderedDimensionIds(parsedDef);
 
     const gameRow = this.db
       .prepare('SELECT uri, name, icon_url, url, developer_name FROM games WHERE uri = ?')
@@ -350,7 +519,11 @@ export class AppViewQueries {
       timeframe,
       scope,
       viewer,
+      player,
+      includeObsolete,
       sortBy,
+      dimensions,
+      seed,
       version,
       verifiedOnly: true,
       limit,
@@ -387,6 +560,16 @@ export class AppViewQueries {
             })
           : undefined;
 
+      const enrichedParticipants = entry.participants?.map((p) => {
+        if (!p.did) return p;
+        const pMeta = this.getActorMeta(p.did);
+        return {
+          ...p,
+          handle: pMeta.handle,
+          displayName: pMeta.displayName ?? pMeta.handle ?? p.name ?? p.did,
+        };
+      });
+
       const replayCid = row?.replay_cid ?? entry.replayCid;
       const pdsBase = cachedActor?.pdsUrl ?? 'https://bsky.social';
       const replayDownloadUrl = replayCid
@@ -397,6 +580,7 @@ export class AppViewQueries {
         ...entry,
         displayName: actor.displayName ?? actor.handle ?? entry.player,
         avatarUrl: actor.avatarUrl,
+        participants: enrichedParticipants,
         issuerDid: row?.issuer_did,
         keyId: row?.key_id,
         verificationMethod: row?.key_id?.startsWith('label:') ? 'community-label' : 'attestation',
@@ -410,6 +594,11 @@ export class AppViewQueries {
 
     return {
       sortedBy: xrpc.sortedBy,
+      rankingMode: xrpc.rankingMode,
+      includeObsolete,
+      activePlayerFilter: player,
+      activeDimensionsFilter: parseDimensionsFilter(dimensions),
+      activeSeedFilter: seed,
       activeVersionFilter: version,
       definition: {
         uri: String(lbRow.uri),
@@ -419,10 +608,15 @@ export class AppViewQueries {
         iconUrl: lbRow.icon_url ? String(lbRow.icon_url) : undefined,
         iconAlt: lbRow.icon_alt ? String(lbRow.icon_alt) : String(lbRow.name),
         sortOrder: String(lbRow.sort_order),
+        rankingMode: parsedDef.rankingMode ?? 'best',
         scoreFormat: JSON.parse(String(lbRow.score_format_json)),
         components: parsedDef.components,
         componentOrder: orderedCompIds.length > 0 ? orderedCompIds : undefined,
         defaultComponent: parsedDef.defaultComponent,
+        dimensions: parsedDef.dimensions,
+        dimensionOrder: orderedDimIds.length > 0 ? orderedDimIds : undefined,
+        startsAt: parsedDef.startsAt,
+        endsAt: parsedDef.endsAt,
         detailsSchema: parsedDef.detailsSchema,
         rankedVersions: parsedDef.rankedVersions,
         trustedIssuers: parsedDef.trustedIssuers,
@@ -462,13 +656,19 @@ export class AppViewQueries {
         .prepare('SELECT COUNT(*) AS c FROM leaderboard_scores WHERE verified = 1 AND revoked = 0')
         .get() as { c: number }
     ).c;
+    const verifiedMatchesCount = (
+      this.db
+        .prepare('SELECT COUNT(*) AS c FROM match_results WHERE verified = 1 AND revoked = 0')
+        .get() as { c: number }
+    ).c;
     const revocationsCount = (this.db.prepare('SELECT COUNT(*) AS c FROM revocations').get() as { c: number }).c;
     const blockedCount = (
       this.db
         .prepare(
           `SELECT
              (SELECT COUNT(*) FROM achievement_unlocks WHERE verified = 0 OR revoked = 1) +
-             (SELECT COUNT(*) FROM leaderboard_scores WHERE verified = 0 OR revoked = 1) AS c`
+             (SELECT COUNT(*) FROM leaderboard_scores WHERE verified = 0 OR revoked = 1) +
+             (SELECT COUNT(*) FROM match_results WHERE verified = 0 OR revoked = 1) AS c`
         )
         .get() as { c: number }
     ).c;
@@ -578,6 +778,7 @@ export class AppViewQueries {
         achievementDefinitionsCount: achDefsCount,
         verifiedUnlocksCount,
         verifiedScoresCount,
+        verifiedMatchesCount,
         revocationsCount,
         blockedAttemptsCount: blockedCount,
       },
@@ -768,6 +969,11 @@ export class AppViewQueries {
         hiddenSpace: record.hiddenSpace,
         isRedactedStub,
         trustedIssuers: record.trustedIssuers,
+        countsTowardCompletion: record.countsTowardCompletion !== false,
+        repeatable: Boolean(record.repeatable),
+        availableFrom: record.availableFrom,
+        availableUntil: record.availableUntil,
+        retired: Boolean(record.retired),
         masked: maskedForViewer,
         stepsNeeded: record.stepsNeeded,
         group: record.group,
@@ -795,6 +1001,32 @@ export class AppViewQueries {
       })
     );
 
+    const challengeRows = this.db
+      .prepare('SELECT * FROM challenge_definitions WHERE game_uri = ? ORDER BY COALESCE(starts_at, created_at) DESC')
+      .all(gameUri) as Array<Record<string, any>>;
+
+    const challenges = challengeRows.map((c) => ({
+      uri: String(c.uri),
+      title: String(c.title),
+      description: c.description ? String(c.description) : undefined,
+      iconUrl: c.icon_url ? String(c.icon_url) : undefined,
+      cadence: String(c.cadence),
+      seed: c.seed ? String(c.seed) : undefined,
+      targetSteps: c.target_steps !== null && c.target_steps !== undefined ? Number(c.target_steps) : undefined,
+      leaderboardUri: c.leaderboard_uri ? String(c.leaderboard_uri) : undefined,
+      rewardAchievementUri: c.reward_achievement_uri ? String(c.reward_achievement_uri) : undefined,
+      dimensions: c.dimensions_json ? JSON.parse(String(c.dimensions_json)) : undefined,
+      startsAt: c.starts_at ? String(c.starts_at) : undefined,
+      endsAt: c.ends_at ? String(c.ends_at) : undefined,
+    }));
+
+    const matchRows = this.db
+      .prepare(
+        'SELECT * FROM match_results WHERE game_uri = ? AND verified = 1 AND revoked = 0 ORDER BY played_at DESC LIMIT 20'
+      )
+      .all(gameUri) as Array<Record<string, any>>;
+    const recentMatches = this.formatVerifiedMatchRows(matchRows);
+
     return {
       game: {
         uri: String(gameRow.uri),
@@ -814,7 +1046,47 @@ export class AppViewQueries {
       },
       achievements,
       leaderboards,
+      challenges,
+      recentMatches,
     };
+  }
+
+  private formatVerifiedMatchRows(rows: Array<Record<string, any>>) {
+    const seenMatchKey = new Set<string>();
+    const out: Array<Record<string, any>> = [];
+    for (const r of rows) {
+      const dedupeKey = r.match_id ? `${r.game_uri}::${r.match_id}` : String(r.uri);
+      if (seenMatchKey.has(dedupeKey)) continue;
+      seenMatchKey.add(dedupeKey);
+
+      const rawParticipants = JSON.parse(String(r.participants_json)) as MatchParticipant[];
+      const participants = rawParticipants.map((p) => {
+        if (!p.did) return p;
+        const meta = this.getActorMeta(p.did);
+        return {
+          ...p,
+          handle: meta.handle,
+          displayName: meta.displayName ?? meta.handle ?? p.name ?? p.did,
+        };
+      });
+
+      out.push({
+        uri: String(r.uri),
+        repositoryDid: String(r.repository_did),
+        gameUri: String(r.game_uri),
+        matchId: r.match_id ? String(r.match_id) : undefined,
+        mode: r.mode ? String(r.mode) : undefined,
+        leaderboardUri: r.leaderboard_uri ? String(r.leaderboard_uri) : undefined,
+        challengeUri: r.challenge_uri ? String(r.challenge_uri) : undefined,
+        participants,
+        details: r.details_json ? JSON.parse(String(r.details_json)) : undefined,
+        playedAt: String(r.played_at),
+        verificationMethod: r.verification_method ? String(r.verification_method) : 'attestation',
+        coSigners: r.cosigners_json ? (JSON.parse(String(r.cosigners_json)) as string[]) : undefined,
+        attestationCid: r.attestation_cid ? String(r.attestation_cid) : undefined,
+      });
+    }
+    return out;
   }
 
   /**
@@ -836,6 +1108,7 @@ export class AppViewQueries {
       description: r.description ? String(r.description) : undefined,
       iconUrl: r.icon_url ? String(r.icon_url) : undefined,
       sortOrder: String(r.sort_order),
+      rankingMode: r.ranking_mode ? String(r.ranking_mode) : 'best',
       timeframes: JSON.parse(String(r.timeframes_json)) as Timeframe[],
       recordPolicy: String(r.record_policy),
       gameUri: String(r.game_uri),
@@ -860,7 +1133,9 @@ export class AppViewQueries {
       const unlockedRows = this.db
         .prepare(
           `SELECT u.uri, u.unlocked_at, u.attestation_cid, u.key_id,
-                  d.uri AS def_uri, d.title, d.description, d.tier, d.icon_url, d.icon_alt
+                  u.participants_json, u.run_id, u.details_json, u.media_url, u.media_alt, u.note,
+                  d.uri AS def_uri, d.title, d.description, d.tier, d.icon_url, d.icon_alt,
+                  d.counts_toward_completion, d.repeatable
            FROM achievement_unlocks u
            JOIN achievement_definitions d ON d.uri = u.achievement_uri
            WHERE u.player_did = ? AND d.game_uri = ? AND u.verified = 1 AND u.revoked = 0
@@ -868,8 +1143,14 @@ export class AppViewQueries {
         )
         .all(profile.did, gSummary.game) as Array<Record<string, any>>;
 
-      // Deduplicate by achievement definition URI
+      // Deduplicate non-repeatable definitions; track repeatCount for repeatable definitions
       const seenDef = new Set<string>();
+      const repeatCountByDef = new Map<string, number>();
+      for (const r of unlockedRows) {
+        const id = String(r.def_uri);
+        repeatCountByDef.set(id, (repeatCountByDef.get(id) ?? 0) + 1);
+      }
+
       const unlockedBadges = unlockedRows
         .filter((r) => {
           const id = String(r.def_uri);
@@ -877,17 +1158,38 @@ export class AppViewQueries {
           seenDef.add(id);
           return true;
         })
-        .map((r) => ({
-          unlockUri: String(r.uri),
-          achievementUri: String(r.def_uri),
-          title: String(r.title),
-          description: String(r.description),
-          tier: r.tier ? String(r.tier) : undefined,
-          iconUrl: r.icon_url ? String(r.icon_url) : undefined,
-          iconAlt: r.icon_alt ? String(r.icon_alt) : String(r.title),
-          unlockedAt: String(r.unlocked_at),
-          attestationCid: r.attestation_cid ? String(r.attestation_cid) : undefined,
-        }));
+        .map((r) => {
+          const id = String(r.def_uri);
+          const rawParticipants: Participant[] | undefined = r.participants_json
+            ? JSON.parse(String(r.participants_json))
+            : undefined;
+          const participants = rawParticipants?.map((p) => {
+            if (!p.did) return p;
+            const pMeta = this.getActorMeta(p.did);
+            return { ...p, handle: pMeta.handle, displayName: pMeta.displayName ?? pMeta.handle ?? p.name ?? p.did };
+          });
+
+          return {
+            unlockUri: String(r.uri),
+            achievementUri: id,
+            title: String(r.title),
+            description: String(r.description),
+            tier: r.tier ? String(r.tier) : undefined,
+            countsTowardCompletion: Number(r.counts_toward_completion ?? 1) !== 0,
+            repeatable: Number(r.repeatable ?? 0) === 1,
+            repeatCount: Number(r.repeatable ?? 0) === 1 ? repeatCountByDef.get(id) ?? 1 : undefined,
+            iconUrl: r.icon_url ? String(r.icon_url) : undefined,
+            iconAlt: r.icon_alt ? String(r.icon_alt) : String(r.title),
+            unlockedAt: String(r.unlocked_at),
+            attestationCid: r.attestation_cid ? String(r.attestation_cid) : undefined,
+            runId: r.run_id ? String(r.run_id) : undefined,
+            participants,
+            details: r.details_json ? JSON.parse(String(r.details_json)) : undefined,
+            mediaUrl: r.media_url ? String(r.media_url) : undefined,
+            mediaAlt: r.media_alt ? String(r.media_alt) : undefined,
+            note: r.note ? String(r.note) : undefined,
+          };
+        });
 
       // Active incremental progress for locked achievements in this game
       const progressRows = this.db
@@ -968,6 +1270,16 @@ export class AppViewQueries {
       })
     );
 
+    const matchRows = this.db
+      .prepare(
+        `SELECT * FROM match_results
+         WHERE (repository_did = ? OR participants_json LIKE ?)
+           AND verified = 1 AND revoked = 0
+         ORDER BY played_at DESC LIMIT 20`
+      )
+      .all(profile.did, `%${profile.did}%`) as Array<Record<string, any>>;
+    const recentMatches = this.formatVerifiedMatchRows(matchRows);
+
     return {
       actor: {
         did: profile.did,
@@ -978,6 +1290,7 @@ export class AppViewQueries {
       profile,
       games: gamesDetailed,
       leaderboardStandings: leaderboardStandings.filter((s) => Boolean(s.entry)),
+      recentMatches,
     };
   }
 
@@ -1083,6 +1396,49 @@ export class AppViewQueries {
       };
     }
 
+    const matchRow = this.db
+      .prepare('SELECT * FROM match_results WHERE uri = ?')
+      .get(recordUri) as Record<string, any> | undefined;
+
+    if (matchRow) {
+      const repoDid = String(matchRow.repository_did);
+      const matchingRev = matchRow.attestation_cid
+        ? (this.db
+            .prepare('SELECT * FROM revocations WHERE attestation_cid = ? OR record_uri = ? LIMIT 1')
+            .get(String(matchRow.attestation_cid), recordUri) as Record<string, any> | undefined)
+        : (this.db
+            .prepare('SELECT * FROM revocations WHERE record_uri = ? LIMIT 1')
+            .get(recordUri) as Record<string, any> | undefined);
+
+      const coSigners: string[] | undefined = matchRow.cosigners_json
+        ? JSON.parse(String(matchRow.cosigners_json))
+        : undefined;
+      const activeLabels = this.getActiveLabelsForTargets([recordUri, repoDid, ...(coSigners ?? [])]);
+
+      return {
+        kind: 'match.result',
+        uri: String(matchRow.uri),
+        playerDid: repoDid,
+        subjectUri: String(matchRow.leaderboard_uri ?? matchRow.game_uri),
+        issuerDid: matchRow.issuer_did ? String(matchRow.issuer_did) : undefined,
+        verificationMethod: matchRow.verification_method ? String(matchRow.verification_method) : undefined,
+        coSigners,
+        keyId: matchRow.key_id ? String(matchRow.key_id) : undefined,
+        attestationCid: matchRow.attestation_cid ? String(matchRow.attestation_cid) : undefined,
+        version: matchRow.version ? String(matchRow.version) : undefined,
+        replayCid: matchRow.replay_cid ? String(matchRow.replay_cid) : undefined,
+        verified: Number(matchRow.verified) === 1 && Number(matchRow.revoked) === 0,
+        revoked: Number(matchRow.revoked) === 1,
+        labelInvalidated: Number(matchRow.label_invalidated) === 1,
+        activeLabels,
+        verificationError: matchRow.verification_error ? String(matchRow.verification_error) : undefined,
+        verificationMessage: matchRow.verification_message ? String(matchRow.verification_message) : undefined,
+        record: JSON.parse(String(matchRow.raw_json)),
+        revocation: matchingRev ? JSON.parse(String(matchingRev.raw_json)) : undefined,
+        revocationUri: matchingRev ? String(matchingRev.uri) : undefined,
+      };
+    }
+
     throw Object.assign(new Error(`Record not found in AppView index: ${recordUri}`), { status: 404 });
   }
 
@@ -1144,6 +1500,16 @@ export class AppViewQueries {
             `SELECT 'achievement.unlock' AS kind, uri, player_did, achievement_uri AS subject_uri,
                     verification_error, verification_message, attestation_cid, revoked, revocation_reason, unlocked_at AS ts
              FROM achievement_unlocks
+             WHERE verified = 0 OR revoked = 1`
+          )
+          .all() as Array<Record<string, any>>
+      ),
+      ...(
+        this.db
+          .prepare(
+            `SELECT 'match.result' AS kind, uri, repository_did AS player_did, game_uri AS subject_uri,
+                    verification_error, verification_message, attestation_cid, revoked, revocation_reason, played_at AS ts
+             FROM match_results
              WHERE verified = 0 OR revoked = 1`
           )
           .all() as Array<Record<string, any>>

@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "Returns a player's Gamercard summary centered on per-game achievement appreciation and completion (with no global XP/gamerscore system or per-game achievement count cap), excluding unverified or publisher-revoked (`games.opengaming.revocation`) unlocks.",
+      "description": "Returns a player's Gamercard summary centered on per-game achievement appreciation and completion (with no global XP/gamerscore system or per-game achievement count cap). Bonus/event/DLC Feats of Strength (`countsTowardCompletion: false`) are celebrated via `bonusUnlockedCount` without penalizing `100%` base-game completion.",
       "parameters": {
         "type": "params",
         "required": ["actor"],
@@ -34,12 +34,12 @@
             "gamesPlayed": {
               "type": "integer",
               "minimum": 0,
-              "description": "Number of distinct games in which the player has earned at least one verified achievement."
+              "description": "Number of distinct games in which the player has earned at least one verified achievement (including bonus/event achievements)."
             },
             "completedGames": {
               "type": "integer",
               "minimum": 0,
-              "description": "Number of games in which the player has unlocked 100% of published achievements."
+              "description": "Number of games in which the player has unlocked 100% of completion-counted achievements (`countsTowardCompletion != false`)."
             },
             "totalUnlocks": {
               "type": "integer",
@@ -82,22 +82,28 @@
         },
         "unlockedCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Distinct completion-counted (`countsTowardCompletion != false`) achievements unlocked by the player."
         },
         "totalAchievements": {
           "type": "integer",
           "minimum": 0,
-          "description": "Total achievements defined by this game (uncapped)."
+          "description": "Total completion-counted (`countsTowardCompletion != false`) achievements defined by this game (uncapped)."
+        },
+        "bonusUnlockedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Verified unlocks earned on non-completion Feats of Strength, Game Jam, or DLC bonus achievements (`countsTowardCompletion: false`)."
         },
         "completionPercent": {
           "type": "integer",
           "minimum": 0,
           "maximum": 100,
-          "description": "Floored integer completion percentage (`0..100`), reaching `100` strictly when `unlockedCount == totalAchievements`."
+          "description": "Floored integer completion percentage (`0..100`), reaching `100` strictly when `totalAchievements > 0` and `unlockedCount == totalAchievements`."
         },
         "completed": {
           "type": "boolean",
-          "description": "True when the game defines at least one achievement and the player has unlocked all of them."
+          "description": "True when the game defines at least one completion-counted achievement and the player has unlocked all of them."
         },
         "latestUnlockAt": {
           "type": "string",

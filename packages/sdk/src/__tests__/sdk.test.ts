@@ -7,8 +7,10 @@ import { jsonToLex } from '@atproto/lexicon';
 import {
   NSIDS,
   calculateGameCompletion,
+  coSignMatchResult,
   createOpenGamingLexicons,
   createRevocationRecord,
+  createSignedMatchResult,
   createSignedProgress,
   createSignedScore,
   createSignedUnlock,
@@ -17,18 +19,27 @@ import {
   formatScore,
   generateSigningKeys,
   getOrderedComponentIds,
+  getOrderedDimensionIds,
   getOrderedJudgmentIds,
+  getOverwriteBestScoreRkey,
   getScoreSortMetric,
   loadSigningKey,
+  parseDimensionsFilter,
   resolveActiveLabels,
+  resolveTranslation,
   sortAchievementDefinitions,
   summarizeActorProfile,
   validateComponentDefs,
+  validateDimensionDefs,
   validateScoreComponents,
+  validateScoreDimensions,
+  verifyMatchResult,
   verifyRecordAttestation,
   type AchievementDefinitionRecord,
   type AtprotoLabel,
+  type ChallengeDefinitionRecord,
   type LeaderboardDefinitionRecord,
+  type MatchResultRecord,
 } from '../index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -494,7 +505,7 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
       icon: DUMMY_ICON,
       components: {
         lamp: {
-          $type: 'games.opengaming.defs#enumComponentDef',
+          $type: 'games.opengaming.leaderboard.definition#enum',
           name: 'Clear Lamp',
           sortOrder: 'smallerIsBetter',
           values: [
@@ -504,12 +515,12 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
           ],
         },
         comment: {
-          $type: 'games.opengaming.defs#textComponentDef',
+          $type: 'games.opengaming.leaderboard.definition#text',
           name: 'Run Note',
           maxGraphemes: 64,
         },
         accuracy: {
-          $type: 'games.opengaming.defs#percentageComponentDef',
+          $type: 'games.opengaming.leaderboard.definition#percentage',
           name: 'Accuracy',
           sortOrder: 'largerIsBetter',
           precision: 2,
@@ -517,7 +528,7 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
           maximum: 10000,
         },
         'ex-score': {
-          $type: 'games.opengaming.defs#pointsComponentDef',
+          $type: 'games.opengaming.leaderboard.definition#points',
           name: 'EX Score',
           sortOrder: 'largerIsBetter',
           minimum: 0,
@@ -526,7 +537,7 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
           unitPlural: 'EX',
         },
         'clear-time': {
-          $type: 'games.opengaming.defs#timeComponentDef',
+          $type: 'games.opengaming.leaderboard.definition#time',
           name: 'Clear Time',
           sortOrder: 'smallerIsBetter',
           timeUnit: 'milliseconds',
@@ -583,11 +594,11 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
       issuerDid: GAME_DID,
       rkey: 'rhythm-pb-1',
       components: {
-        'ex-score': { $type: 'games.opengaming.defs#pointsComponentVal', value: 2840 },
-        accuracy: { $type: 'games.opengaming.defs#percentageComponentVal', value: 9942 },
-        'clear-time': { $type: 'games.opengaming.defs#timeComponentVal', value: 124150 },
-        lamp: { $type: 'games.opengaming.defs#enumComponentVal', value: 'fc' },
-        comment: { $type: 'games.opengaming.defs#textComponentVal', value: 'Sightread FC!' },
+        'ex-score': { $type: 'games.opengaming.leaderboard.score#points', value: 2840 },
+        accuracy: { $type: 'games.opengaming.leaderboard.score#percentage', value: 9942 },
+        'clear-time': { $type: 'games.opengaming.leaderboard.score#time', value: 124150 },
+        lamp: { $type: 'games.opengaming.leaderboard.score#enum', value: 'fc' },
+        comment: { $type: 'games.opengaming.leaderboard.score#text', value: 'Sightread FC!' },
       },
       details: judgmentDetails,
       version: 'sha256:legal-chart-v2',
@@ -623,14 +634,14 @@ describe('Leaderboard Score Formatting & Record Policies', () => {
     // Reject reserved/invalid map keys and $type mismatches at application layer
     assert.notEqual(
       validateScoreComponents(
-        { $keyFormat: { $type: 'games.opengaming.defs#pointsComponentVal', value: 1 } },
+        { $keyFormat: { $type: 'games.opengaming.leaderboard.score#points', value: 1 } },
         rhythmDef
       ),
       null
     );
     assert.notEqual(
       validateScoreComponents(
-        { 'ex-score': { $type: 'games.opengaming.defs#enumComponentVal', value: 'fc' } },
+        { 'ex-score': { $type: 'games.opengaming.leaderboard.score#enum', value: 'fc' } },
         rhythmDef
       ),
       null
@@ -827,6 +838,421 @@ describe('Spoiler-Proof Hidden Stubs, EoS Federation, $sig.rkey Binding & ATProt
     assert.equal(communityVerifiedEos.verified, true);
     if (communityVerifiedEos.verified) {
       assert.equal(communityVerifiedEos.issuerDid, LABELER_DID);
+    }
+  });
+});
+
+describe('v0.2 Roadmap: personalBests, Dimensions, Bonus Achievements, Rich Unlocks, Challenges & P2P Co-Signed Matches', () => {
+  it('supports personalBests multi-component PB history, overwriteBest, signedPrefix, startsAt/endsAt, and dimensions slices', () => {
+    const speedrunLbUri = `at://${GAME_DID}/${NSIDS.LeaderboardDefinition}/speedrun-any`;
+    const speedrunDef: LeaderboardDefinitionRecord = {
+      $type: NSIDS.LeaderboardDefinition,
+      game: GAME_URI,
+      name: 'Any% Speedrun & Score',
+      icon: DUMMY_ICON,
+      components: {
+        time: {
+          $type: 'games.opengaming.leaderboard.definition#time',
+          name: 'Clear Time',
+          sortOrder: 'smallerIsBetter',
+          timeUnit: 'milliseconds',
+        },
+        points: {
+          $type: 'games.opengaming.leaderboard.definition#points',
+          name: 'Style Points',
+          sortOrder: 'largerIsBetter',
+        },
+      },
+      componentOrder: ['time', 'points'],
+      defaultComponent: 'time',
+      dimensions: {
+        character: {
+          name: 'Character',
+          required: true,
+          values: [
+            { id: 'mario', name: 'Mario' },
+            { id: 'luigi', name: 'Luigi' },
+          ],
+        },
+        input: {
+          name: 'Input',
+          required: false,
+          values: [
+            { id: 'pad', name: 'Gamepad' },
+            { id: 'kb', name: 'Keyboard' },
+          ],
+        },
+      },
+      dimensionOrder: ['character', 'input'],
+      startsAt: '2026-11-01T00:00:00.000Z',
+      endsAt: '2026-11-30T23:59:59.999Z',
+      timeframes: ['allTime', 'monthly'],
+      recordPolicy: 'personalBests',
+      createdAt: '2026-11-01T00:00:00.000Z',
+    };
+
+    assert.equal(validateDimensionDefs(speedrunDef.dimensions, speedrunDef.dimensionOrder), null);
+    assert.deepEqual(getOrderedDimensionIds(speedrunDef), ['character', 'input']);
+    assert.deepEqual(parseDimensionsFilter('character=mario,input=pad'), {
+      character: 'mario',
+      input: 'pad',
+    });
+
+    // Missing required dimension 'character' fails validation
+    assert.notEqual(validateScoreDimensions({ input: 'pad' }, speedrunDef), null);
+    assert.equal(validateScoreDimensions({ character: 'mario', input: 'pad' }, speedrunDef), null);
+
+    // Run 1 (Mario): fast time (90s), lower points (1200) -> writes via createRecord (retains PB history!)
+    const run1Comp = {
+      time: { $type: 'games.opengaming.leaderboard.score#time' as const, value: 90000 },
+      points: { $type: 'games.opengaming.leaderboard.score#points' as const, value: 1200 },
+    };
+    const dec1 = evaluateScoreSubmission({
+      leaderboardUri: speedrunLbUri,
+      components: run1Comp,
+      dimensions: { character: 'mario' },
+      definition: speedrunDef,
+      existingPlayerScores: [],
+      now: new Date('2026-11-10T12:00:00.000Z'),
+    });
+    assert.equal(dec1.shouldWrite, true);
+    assert.equal(dec1.writeMode, 'createRecord');
+
+    const existingAfterRun1 = [
+      {
+        $type: NSIDS.LeaderboardScore,
+        leaderboard: speedrunLbUri,
+        components: run1Comp,
+        dimensions: { character: 'mario' },
+        recordedAt: '2026-11-10T12:00:00.000Z',
+      },
+    ];
+
+    // Run 2 (Mario): slower time (98s), HIGHER style points (1950) -> STILL a PB on 'points' component!
+    const run2Comp = {
+      time: { $type: 'games.opengaming.leaderboard.score#time' as const, value: 98000 },
+      points: { $type: 'games.opengaming.leaderboard.score#points' as const, value: 1950 },
+    };
+    const dec2 = evaluateScoreSubmission({
+      leaderboardUri: speedrunLbUri,
+      components: run2Comp,
+      dimensions: { character: 'mario' },
+      definition: speedrunDef,
+      existingPlayerScores: existingAfterRun1,
+      now: new Date('2026-11-11T12:00:00.000Z'),
+    });
+    assert.equal(dec2.shouldWrite, true);
+    assert.equal(dec2.writeMode, 'createRecord');
+
+    // Run 3 (Mario): dominated on BOTH components (105s, 1100 pts) -> skipped!
+    const run3Comp = {
+      time: { $type: 'games.opengaming.leaderboard.score#time' as const, value: 105000 },
+      points: { $type: 'games.opengaming.leaderboard.score#points' as const, value: 1100 },
+    };
+    const dec3 = evaluateScoreSubmission({
+      leaderboardUri: speedrunLbUri,
+      components: run3Comp,
+      dimensions: { character: 'mario' },
+      definition: speedrunDef,
+      existingPlayerScores: [
+        ...existingAfterRun1,
+        {
+          $type: NSIDS.LeaderboardScore,
+          leaderboard: speedrunLbUri,
+          components: run2Comp,
+          dimensions: { character: 'mario' },
+          recordedAt: '2026-11-11T12:00:00.000Z',
+        },
+      ],
+      now: new Date('2026-11-12T12:00:00.000Z'),
+    });
+    assert.equal(dec3.shouldWrite, false);
+
+    // Run 4 (Luigi): same 105s / 1100 pts, but in 'luigi' dimension slice -> first Luigi PB, so writes!
+    const dec4Luigi = evaluateScoreSubmission({
+      leaderboardUri: speedrunLbUri,
+      components: run3Comp,
+      dimensions: { character: 'luigi' },
+      definition: speedrunDef,
+      existingPlayerScores: existingAfterRun1,
+      now: new Date('2026-11-12T12:00:00.000Z'),
+    });
+    assert.equal(dec4Luigi.shouldWrite, true);
+
+    // Out-of-window submission after endsAt is rejected
+    const expiredDec = evaluateScoreSubmission({
+      leaderboardUri: speedrunLbUri,
+      components: run1Comp,
+      dimensions: { character: 'mario' },
+      definition: speedrunDef,
+      existingPlayerScores: [],
+      now: new Date('2026-12-05T00:00:00.000Z'),
+    });
+    assert.equal(expiredDec.validBounds, false);
+    assert.equal(expiredDec.shouldWrite, false);
+
+    // overwriteBest uses deterministic rkey and putRecord
+    const overwriteDef: LeaderboardDefinitionRecord = {
+      $type: NSIDS.LeaderboardDefinition,
+      game: GAME_URI,
+      name: 'Golf To-Par',
+      icon: DUMMY_ICON,
+      sortOrder: 'smallerIsBetter',
+      scoreFormat: { kind: 'numeric', decimalPlaces: 0, signedPrefix: true },
+      timeframes: ['allTime'],
+      recordPolicy: 'overwriteBest',
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+    assert.equal(formatScore(-12, overwriteDef.scoreFormat, 'en-US'), '-12');
+    assert.equal(formatScore(3, overwriteDef.scoreFormat, 'en-US'), '+3');
+    assert.equal(formatScore(0, overwriteDef.scoreFormat, 'en-US'), '0');
+
+    const golfDec = evaluateScoreSubmission({
+      leaderboardUri: LB_HIGH_SCORE,
+      score: -12,
+      definition: overwriteDef,
+      existingPlayerScores: [],
+    });
+    assert.equal(golfDec.shouldWrite, true);
+    assert.equal(golfDec.writeMode, 'putRecord');
+    assert.equal(golfDec.recommendedRkey, getOverwriteBestScoreRkey(LB_HIGH_SCORE));
+  });
+
+  it('tracks countsTowardCompletion: false as bonusUnlockedCount, supports repeatable unlocks, rich unlock memories, and BCP-47 translations', async () => {
+    const lex = createOpenGamingLexicons();
+    const gameKeys = await generateSigningKeys();
+
+    const baseAchUri = `at://${GAME_DID}/${NSIDS.AchievementDefinition}/story-clear`;
+    const jamBadgeUri = `at://${GAME_DID}/${NSIDS.AchievementDefinition}/jam-2026-founder`;
+
+    const baseAch: AchievementDefinitionRecord = {
+      $type: NSIDS.AchievementDefinition,
+      game: GAME_URI,
+      title: 'Sky Champion',
+      description: 'Cleared the main campaign.',
+      icon: DUMMY_ICON,
+      countsTowardCompletion: true,
+      translations: {
+        ja: { title: 'スカイチャンピオン', description: 'メインキャンペーンをクリアした。' },
+      },
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+
+    const jamBadge: AchievementDefinitionRecord = {
+      $type: NSIDS.AchievementDefinition,
+      game: GAME_URI,
+      title: 'ATProto Game Jam 2026 Participant',
+      description: 'Played during the November 2026 ATProto Game Jam.',
+      icon: DUMMY_ICON,
+      countsTowardCompletion: false,
+      repeatable: false,
+      availableFrom: '2026-11-01T00:00:00.000Z',
+      availableUntil: '2026-11-22T23:59:59.999Z',
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+
+    assert.equal(resolveTranslation(baseAch, 'ja-JP').title, 'スカイチャンピオン');
+    assert.equal(resolveTranslation(baseAch, 'fr-FR').title, 'Sky Champion');
+
+    const baseUnlockStub = {
+      $type: NSIDS.AchievementUnlock,
+      achievement: baseAchUri,
+      unlockedAt: '2026-11-08T10:00:00.000Z',
+    };
+    const jamUnlockStub = {
+      $type: NSIDS.AchievementUnlock,
+      achievement: jamBadgeUri,
+      unlockedAt: '2026-11-08T11:00:00.000Z',
+    };
+
+    // Player who unlocks ONLY the base achievement (without the time-limited jam badge) STILL achieves 100% completion!
+    const completionBaseOnly = calculateGameCompletion({
+      game: GAME_URI,
+      definitions: [
+        { uri: baseAchUri, record: baseAch },
+        { uri: jamBadgeUri, record: jamBadge },
+      ],
+      verifiedUnlocks: [baseUnlockStub],
+    });
+    assert.equal(completionBaseOnly.totalAchievements, 1);
+    assert.equal(completionBaseOnly.unlockedCount, 1);
+    assert.equal(completionBaseOnly.bonusUnlockedCount ?? 0, 0);
+    assert.equal(completionBaseOnly.completionPercent, 100);
+    assert.equal(completionBaseOnly.completed, true);
+
+    // Player who ALSO has the jam badge gets bonusUnlockedCount = 1 while keeping 100% base completion
+    const completionWithBonus = calculateGameCompletion({
+      game: GAME_URI,
+      definitions: [
+        { uri: baseAchUri, record: baseAch },
+        { uri: jamBadgeUri, record: jamBadge },
+      ],
+      verifiedUnlocks: [baseUnlockStub, jamUnlockStub],
+    });
+    assert.equal(completionWithBonus.bonusUnlockedCount, 1);
+    assert.equal(completionWithBonus.completed, true);
+
+    // Rich RPG/Co-op unlock memory with participants, runId, #unlockContext details, media blob, and note
+    const { record: richUnlock } = await createSignedUnlock({
+      achievement: baseAchUri,
+      game: GAME_URI,
+      playerDid: ALICE_DID,
+      issuerDid: GAME_DID,
+      signingKey: gameKeys.keypair,
+      runId: 'raid-clear-2026-11-08-alpha',
+      participants: [
+        { did: ALICE_DID, role: 'healer' },
+        { did: MALLORY_DID, role: 'tank' },
+      ],
+      details: {
+        $type: 'games.opengaming.defs#unlockContext',
+        summary: 'Defeated the Sky Leviathan with 1 HP left',
+        character: 'Aeris',
+        difficulty: 'tactician',
+        playtimeSeconds: 184200,
+        loadout: ['Sunblade +3', 'Aegis Feather'],
+        stats: { turns: '14', revivesUsed: '0' },
+      },
+      media: DUMMY_ICON,
+      mediaAlt: 'Party standing atop the Sky Spire at sunset.',
+      note: 'Clutch last-turn heal!',
+    });
+
+    lex.assertValidRecord(NSIDS.AchievementUnlock, jsonToLex(richUnlock));
+    const unlockVerify = await verifyRecordAttestation({
+      record: richUnlock,
+      recordUri: `at://${ALICE_DID}/${NSIDS.AchievementUnlock}/story-clear`,
+      playerDid: ALICE_DID,
+      publicDidKey: gameKeys.publicDidKey,
+    });
+    assert.equal(unlockVerify.verified, true);
+  });
+
+  it('validates games.opengaming.challenge.definition and serverless P2P multi-participant co-signed games.opengaming.match.result', async () => {
+    const lex = createOpenGamingLexicons();
+    const aliceKeys = await generateSigningKeys();
+    const bobKeys = await generateSigningKeys();
+    const studioKeys = await generateSigningKeys();
+    const BOB_DID = 'did:plc:bobplayer00000000003';
+
+    const dailyChallenge: ChallengeDefinitionRecord = {
+      $type: NSIDS.ChallengeDefinition,
+      game: GAME_URI,
+      title: 'Daily Wind Tunnel #312',
+      description: 'Survive gale-force crosswinds on seed 2026-11-08.',
+      cadence: 'daily',
+      seed: '2026-11-08',
+      dimensions: { modifiers: 'double-gravity' },
+      leaderboard: LB_HIGH_SCORE,
+      startsAt: '2026-11-08T00:00:00.000Z',
+      endsAt: '2026-11-08T23:59:59.999Z',
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+    lex.assertValidRecord(NSIDS.ChallengeDefinition, jsonToLex(dailyChallenge));
+
+    // Serverless P2P Fighting Game / Chess Match: Alice signs first, Bob co-signs the exact same canonical outcome
+    const { record: aliceSignedOnly, attestationCid: aliceAttestationCid } = await createSignedMatchResult({
+      game: GAME_URI,
+      matchId: 'ft3-finals-match-01',
+      mode: 'ranked-1v1',
+      bestOf: 5,
+      participants: [
+        {
+          did: ALICE_DID,
+          outcome: 'win',
+          placement: 1,
+          score: 3,
+          character: 'Sol',
+          ratingBefore: 1620,
+          ratingAfter: 1638,
+        },
+        {
+          did: BOB_DID,
+          outcome: 'loss',
+          placement: 2,
+          score: 2,
+          character: 'Ky',
+          ratingBefore: 1645,
+          ratingAfter: 1627,
+        },
+      ],
+      details: {
+        $type: 'games.opengaming.match.result#setBreakdown',
+        rounds: [
+          { index: 1, stage: 'Council of Three', winnerDid: ALICE_DID, summary: 'Game 1 (2-0)' },
+          { index: 2, stage: 'Council of Three', winnerDid: BOB_DID, summary: 'Game 2 (1-2)' },
+          { index: 3, stage: 'Council of Three', winnerDid: ALICE_DID, summary: 'Game 3 (2-1)' },
+          { index: 4, stage: 'Council of Three', winnerDid: BOB_DID, summary: 'Game 4 (0-2)' },
+          { index: 5, stage: 'Council of Three', winnerDid: ALICE_DID, summary: 'Game 5 (2-1 Perfect)' },
+        ],
+      },
+      repositoryDid: ALICE_DID,
+      issuerDid: ALICE_DID,
+      signingKey: aliceKeys.keypair,
+      rkey: 'ft3-finals-match-01',
+    });
+
+    lex.assertValidRecord(NSIDS.MatchResult, jsonToLex(aliceSignedOnly));
+
+    const didKeyMap: Record<string, string> = {
+      [ALICE_DID]: aliceKeys.publicDidKey,
+      [BOB_DID]: bobKeys.publicDidKey,
+      [GAME_DID]: studioKeys.publicDidKey,
+    };
+
+    // 1-sided claim signed ONLY by Alice (not publisher, and Bob hasn't co-signed) MUST fail verification!
+    const oneSidedRes = await verifyMatchResult({
+      record: aliceSignedOnly,
+      repositoryDid: ALICE_DID,
+      recordUri: `at://${ALICE_DID}/${NSIDS.MatchResult}/ft3-finals-match-01`,
+      participantDidKeys: didKeyMap,
+    });
+    assert.equal(oneSidedRes.verified, false);
+    if (!oneSidedRes.verified) {
+      assert.equal(oneSidedRes.error, 'missing_participant_signatures');
+    }
+
+    // Bob co-signs the match outcome -> now BOTH participants cryptographically attest to the exact same payload CID!
+    const { record: mutuallyCoSigned, attestationCid: bobAttestationCid } = await coSignMatchResult({
+      record: aliceSignedOnly,
+      repositoryDid: ALICE_DID,
+      signerDid: BOB_DID,
+      signingKey: bobKeys.keypair,
+      rkey: 'ft3-finals-match-01',
+    });
+    lex.assertValidRecord(NSIDS.MatchResult, jsonToLex(mutuallyCoSigned));
+
+    const p2pVerified = await verifyMatchResult({
+      record: mutuallyCoSigned,
+      repositoryDid: ALICE_DID,
+      recordUri: `at://${ALICE_DID}/${NSIDS.MatchResult}/ft3-finals-match-01`,
+      participantDidKeys: didKeyMap,
+    });
+    assert.equal(p2pVerified.verified, true);
+    if (p2pVerified.verified) {
+      assert.equal(p2pVerified.verificationMethod, 'multi-participant');
+      assert.deepEqual(p2pVerified.coSigners?.sort(), [ALICE_DID, BOB_DID].sort());
+      assert.equal(p2pVerified.attestationCid, aliceAttestationCid);
+    }
+
+    // Publisher revocation with `scope: 'match'` against ANY participant's co-signature CID revokes the match result
+    const { record: matchRev } = createRevocationRecord({
+      scope: 'match',
+      player: BOB_DID,
+      subject: GAME_URI,
+      attestationCid: bobAttestationCid,
+      reason: 'cheating',
+    });
+    const revokedMatchRes = await verifyMatchResult({
+      record: mutuallyCoSigned,
+      repositoryDid: ALICE_DID,
+      recordUri: `at://${ALICE_DID}/${NSIDS.MatchResult}/ft3-finals-match-01`,
+      participantDidKeys: didKeyMap,
+      revocations: [{ publisherDid: GAME_DID, value: matchRev }],
+    });
+    assert.equal(revokedMatchRes.verified, false);
+    if (!revokedMatchRes.verified) {
+      assert.equal(revokedMatchRes.error, 'revoked');
     }
   });
 });

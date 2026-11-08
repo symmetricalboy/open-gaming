@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). For spoiler-sensitive secrets (`hidden: true`), `title`, `description`, and `icon` MAY be omitted from the public PDS stub and revealed via an access-controlled ATProto Space (`hiddenSpace`) granted upon unlock.",
+      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). Supports spoiler-safe secrets (`hidden` + `hiddenSpace`), non-penalizing event/DLC/jam Feats of Strength (`countsTowardCompletion: false`), recurring commendations (`repeatable`), multi-locale `translations`, and post-EoS `trustedIssuers`.",
       "key": "any",
       "record": {
         "type": "object",
@@ -33,6 +33,11 @@
             "maxGraphemes": 300,
             "maxLength": 1000,
             "description": "Optional imperative prompt shown BEFORE the player unlocks the achievement (e.g. `Clear 50 posts in a single run`), when `description` is written in the past tense (`You cleared 50 posts!`)."
+          },
+          "translations": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#translationMap",
+            "description": "Optional localized `title`, `description`, and `requirement` strings keyed by BCP-47 language tag (e.g. `ja`, `ko`, `es`)."
           },
           "icon": {
             "type": "blob",
@@ -68,6 +73,31 @@
             "format": "uri",
             "maxLength": 512,
             "description": "Optional URI of an access-controlled ATProto Space (or reveal endpoint) holding the unredacted `achievement.definition` metadata for players who have unlocked this hidden achievement."
+          },
+          "countsTowardCompletion": {
+            "type": "boolean",
+            "default": true,
+            "description": "When `false`, marks this achievement as a bonus 'Feat of Strength', time-limited Game Jam badge, DLC add-on, or mutually exclusive flavour route that celebrates earners (`bonusUnlockedCount`) without penalizing newcomers' `100%` base-game completion."
+          },
+          "repeatable": {
+            "type": "boolean",
+            "default": false,
+            "description": "When `true`, players may earn this achievement multiple times across distinct `achievement.unlock` records (e.g. winning recurring weekly events)."
+          },
+          "availableFrom": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional timestamp when a seasonal, promotional, or Game Jam achievement becomes earnable."
+          },
+          "availableUntil": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional timestamp after which a seasonal or Game Jam achievement is no longer earnable."
+          },
+          "retired": {
+            "type": "boolean",
+            "default": false,
+            "description": "When `true`, indicates this achievement has been retired and is preserved purely as a legacy trophy for prior earners."
           },
           "stepsNeeded": {
             "type": "integer",

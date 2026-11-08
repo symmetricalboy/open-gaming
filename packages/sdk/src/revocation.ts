@@ -23,7 +23,7 @@ export function getAttestationRevocationRkey(attestationCid: string): string {
 }
 
 /**
- * Deterministic rkey for scoped player revocations (`achievement` | `leaderboard` | `game`).
+ * Deterministic rkey for scoped player revocations (`achievement` | `leaderboard` | `match` | `challenge` | `game`).
  */
 export function getScopedRevocationRkey({
   scope,
@@ -176,7 +176,8 @@ export async function checkRevocationOnPds({
 }
 
 /**
- * Evaluate whether an unlock, progress, or score record is invalidated by any publisher/issuer revocation.
+ * Evaluate whether an unlock, progress, score, or match result record is invalidated by any
+ * publisher/issuer revocation.
  *
  * Enforces authority: a revocation ONLY applies if it was published by either the DID that owns the
  * target definition (`definitionPublisherDid`) or the DID that signed the attestation (`issuerDid`).
@@ -200,22 +201,27 @@ export function isRecordRevoked({
 }): RevocationRecord | null {
   const achievementUri = typeof record.achievement === 'string' ? record.achievement : undefined;
   const leaderboardUri = typeof record.leaderboard === 'string' ? record.leaderboard : undefined;
+  const challengeUri = typeof record.challenge === 'string' ? record.challenge : undefined;
   const gameUri = typeof record.game === 'string' ? record.game : undefined;
   const recordTimestampStr =
     typeof record.unlockedAt === 'string'
       ? record.unlockedAt
       : typeof record.recordedAt === 'string'
         ? record.recordedAt
-        : typeof record.updatedAt === 'string'
-          ? record.updatedAt
-          : undefined;
+        : typeof record.playedAt === 'string'
+          ? record.playedAt
+          : typeof record.updatedAt === 'string'
+            ? record.updatedAt
+            : undefined;
   const recordTimeMs = recordTimestampStr ? Date.parse(recordTimestampStr) : NaN;
 
   const authorizedPublishers = new Set<string>([issuerDid]);
   if (definitionPublisherDid) {
     authorizedPublishers.add(definitionPublisherDid);
   }
-  const inferredTargetOwner = extractDidFromAtUri(achievementUri ?? leaderboardUri ?? gameUri ?? '');
+  const inferredTargetOwner = extractDidFromAtUri(
+    achievementUri ?? leaderboardUri ?? challengeUri ?? gameUri ?? ''
+  );
   if (inferredTargetOwner) {
     authorizedPublishers.add(inferredTargetOwner);
   }
@@ -263,6 +269,18 @@ export function isRecordRevoked({
     }
     if (rev.scope === 'leaderboard' && leaderboardUri && rev.subject === leaderboardUri) {
       return rev;
+    }
+    if (rev.scope === 'challenge' && challengeUri && rev.subject === challengeUri) {
+      return rev;
+    }
+    if (rev.scope === 'match' && record.$type === NSIDS.MatchResult) {
+      if (
+        (gameUri && rev.subject === gameUri) ||
+        (leaderboardUri && rev.subject === leaderboardUri) ||
+        (challengeUri && rev.subject === challengeUri)
+      ) {
+        return rev;
+      }
     }
     if (rev.scope === 'game') {
       if (gameUri && rev.subject === gameUri) {

@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Published in the player's PDS when recording a run for a `games.opengaming.leaderboard.definition`. Supports single-integer `score`, multi-component `components` (Points + Time + Accuracy + Lamps), open-union genre `details` (such as rhythm-game `#judgmentBreakdown`), chart/build `version` hashes, deterministic `replay` blobs for post-EoS server-free verification, and optional multi-issuer inline `signatures`.",
+      "description": "Published in the player's PDS when recording a run for a `games.opengaming.leaderboard.definition`. Supports single-integer `score`, local multi-component values (`#points`, `#percentage`, `#time`, `#enum`, `#text`), sub-board `dimensions` and daily/custom `seed`, co-op `participants` + `runId`, open-union genre `details`, chart/build `version` hashes, deterministic `replay` blobs, and optional multi-issuer inline `signatures`.",
       "key": "any",
       "record": {
         "type": "object",
@@ -33,7 +33,7 @@
           },
           "score": {
             "type": "integer",
-            "description": "Headline integer score value (e.g. points, milliseconds, or `defaultComponent` value). Recommended on all records so generic gamercards can render rankings without custom component logic; optional when `components` is provided."
+            "description": "Headline integer score value (e.g. points, milliseconds, Elo rating, or `defaultComponent` value). Recommended on all records so generic gamercards can render rankings without custom component logic; optional when `components` is provided."
           },
           "displayScore": {
             "type": "string",
@@ -43,8 +43,32 @@
           },
           "components": {
             "type": "ref",
-            "ref": "games.opengaming.defs#scoreComponentValMap",
-            "description": "Optional dictionary map of component values keyed by the component keys declared in `leaderboard.definition#components`. Forward-compatible with the proposed Lexicon `map` schema type with zero wire or attestation CID migration."
+            "ref": "#componentMap",
+            "description": "Optional dictionary map of local typed component values (`#points`, `#percentage`, `#time`, `#enum`, `#text`) keyed by the component keys declared in `leaderboard.definition#components`."
+          },
+          "dimensions": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#stringMap",
+            "description": "Optional dictionary map of sub-board category values (e.g. `{ \"mode\": \"4k\", \"inputMethod\": \"keyboard\", \"character\": \"luigi\" }`) matching `leaderboard.definition#dimensions`."
+          },
+          "seed": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional daily puzzle ID, procedural world seed, or challenge token (e.g. `2026-11-08` or `BALATRO-8K2F9`)."
+          },
+          "participants": {
+            "type": "array",
+            "maxLength": 32,
+            "description": "Optional roster of co-op teammates, duo partners, or squad members who achieved this score together.",
+            "items": {
+              "type": "ref",
+              "ref": "games.opengaming.defs#participant"
+            }
+          },
+          "runId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional shared deterministic session/clear ID across co-op teammates' PDS score records so AppViews deduplicate a team run into a single ranked row."
           },
           "details": {
             "type": "union",
@@ -87,6 +111,85 @@
               "closed": false
             }
           }
+        }
+      }
+    },
+    "points": {
+      "type": "object",
+      "description": "Integer points/count value matching a `leaderboard.definition#points` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "percentage": {
+      "type": "object",
+      "description": "Scaled fixed-point integer percentage value matching a `leaderboard.definition#percentage` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "description": "Integer time duration value matching a `leaderboard.definition#time` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      }
+    },
+    "enum": {
+      "type": "object",
+      "description": "Option `id` matching a `leaderboard.definition#enum` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "format": "record-key",
+          "maxLength": 32
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "description": "Display text value matching a `leaderboard.definition#text` entry under the same map key.",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "maxGraphemes": 256,
+          "maxLength": 1000
+        }
+      }
+    },
+    "componentMap": {
+      "type": "object",
+      "description": "Dictionary map of component key (`record-key` format, matching `leaderboard.definition#components`) to local typed component value (`#points`, `#percentage`, `#time`, `#enum`, `#text`). Forward-compatible with the proposed Lexicon `map` type without changing wire data or DAG-CBOR attestation CIDs.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "union",
+          "refs": [
+            "#points",
+            "#percentage",
+            "#time",
+            "#enum",
+            "#text"
+          ],
+          "closed": false,
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
         }
       }
     }

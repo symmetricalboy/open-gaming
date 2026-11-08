@@ -1,17 +1,17 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.defs",
-  "description": "Shared type definitions for Open Gaming achievements, multi-component leaderboards, inline attestations, and genre extensions.",
+  "description": "Shared type definitions for Open Gaming inline attestations, single-metric score formatting, co-op participants, multi-locale translations, dimension maps, and genre breakdowns.",
   "defs": {
     "inlineSignature": {
       "type": "object",
-      "description": "An inline CID-first cryptographic attestation (compatible with the badge.blue / atproto-attestation specification). Computed over the DAG-CBOR CIDv1 of the parent record with `signatures` stripped and `$sig` injected containing `repository: <playerDid>` (and optional `rkey` when bound to a specific record key). Supports multi-issuer federation via `issuer`.",
+      "description": "An inline CID-first cryptographic attestation (compatible with the badge.blue / atproto-attestation specification). Computed over the DAG-CBOR CIDv1 of the parent record with `signatures` stripped and `$sig` injected containing `repository: <playerDid>` (and optional `rkey` when bound to a specific record key). Supports publisher signing, multi-issuer EoS federation (`issuer`), and peer-to-peer multi-participant match co-signing.",
       "required": ["key", "signature"],
       "properties": {
         "key": {
           "type": "string",
           "maxLength": 256,
-          "description": "Verification method URI or DID key used to sign the attestation CID (e.g. `did:plc:gamepublisher#attestations`, `did:plc:communityhost#attestations`, or `did:key:z...`)."
+          "description": "Verification method URI or DID key used to sign the attestation CID (e.g. `did:plc:gamepublisher#attestations`, `did:plc:communityhost#attestations`, `did:plc:opponent#attestations`, or `did:key:z...`)."
         },
         "signature": {
           "type": "bytes",
@@ -21,7 +21,7 @@
         "issuer": {
           "type": "string",
           "format": "did",
-          "description": "Optional DID of the game publisher, tournament host, or community revival authority issuing the attestation."
+          "description": "Optional DID of the game publisher, tournament host, community revival authority, or co-signing match participant issuing the attestation."
         },
         "issuedAt": {
           "type": "string",
@@ -82,272 +82,162 @@
           "maxGraphemes": 32,
           "maxLength": 128,
           "description": "Optional custom plural unit label for `numeric` scores (e.g. `meters`, `pipes`, `likes`, `pts`)."
+        },
+        "signedPrefix": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, positive values render with an explicit leading `+` (e.g. `+3` vs `-4` for golf-style par scores or rating deltas)."
         }
       }
     },
-    "enumOption": {
+    "option": {
       "type": "object",
-      "description": "A named option in an `#enumComponentDef`, ordered from best (index 0) to worst unless `sortOrder` specifies otherwise.",
+      "description": "A named categorical option used in `leaderboard.definition#enum` components or `leaderboard.definition#dimension` sub-board variables.",
       "required": ["id", "name"],
       "properties": {
         "id": {
           "type": "string",
           "format": "record-key",
           "maxLength": 32,
-          "description": "Stable identifier for this enum value (e.g. `all-perfect`, `full-combo`, `clear`, `rank-s`)."
+          "description": "Stable machine identifier for this option (e.g. `all-perfect`, `full-combo`, `4k`, `keyboard`, `glitchless`)."
         },
         "name": {
           "type": "string",
           "maxGraphemes": 64,
           "maxLength": 200,
-          "description": "Human-readable display label (e.g. `All Perfect`, `Full Combo`, `S`)."
+          "description": "Human-readable display label (e.g. `All Perfect`, `Full Combo`, `4-Key`, `Keyboard`, `Glitchless`)."
         }
       }
     },
-    "pointsComponentDef": {
+    "participant": {
       "type": "object",
-      "description": "Defines an integer points/count component on a multi-component leaderboard (e.g. EX Score, Points, Collectibles, Max Combo).",
-      "required": ["name"],
+      "description": "A player or local couch co-op guest credited in a multiplayer co-op, duo, squad, or raid run (`leaderboard.score` or `achievement.unlock`).",
       "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "AT Protocol DID of the participant. Optional so couch co-op guests without an ATProto account can still be credited by `name`."
+        },
         "name": {
           "type": "string",
           "maxGraphemes": 64,
-          "maxLength": 200
+          "maxLength": 200,
+          "description": "Optional display name or guest handle at the time of the run."
         },
-        "sortOrder": {
+        "role": {
           "type": "string",
-          "maxLength": 32,
-          "knownValues": ["largerIsBetter", "smallerIsBetter"],
-          "default": "largerIsBetter"
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional class, seat, or role played during the run (e.g. `healer`, `pilot`, `player-2`, `left-pad`)."
         },
-        "minimum": {
-          "type": "integer"
-        },
-        "maximum": {
-          "type": "integer"
-        },
-        "unitSingular": {
+        "team": {
           "type": "string",
-          "maxGraphemes": 32,
-          "maxLength": 128
-        },
-        "unitPlural": {
-          "type": "string",
-          "maxGraphemes": 32,
-          "maxLength": 128
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional squad or party name."
         }
       }
     },
-    "percentageComponentDef": {
+    "stringMap": {
       "type": "object",
-      "description": "Defines a fixed-point percentage accuracy/completion component. Values are stored as integers scaled by `10^precision` (e.g. `precision: 2` and value `9942` displays as `99.42%`).",
-      "required": ["name"],
+      "description": "Forward-compatible Lexicon `map` of `record-key` keys (`1..32` chars) to string values (`<= 256` chars), used for sub-board `dimensions` (e.g. `{ \"mode\": \"4k\", \"inputMethod\": \"keyboard\" }`) and custom key-value attributes.",
       "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "record-key",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "translation": {
+      "type": "object",
+      "description": "Localized display text fields for an achievement, leaderboard, or challenge definition in a specific BCP-47 language.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxGraphemes": 100,
+          "maxLength": 300,
+          "description": "Localized achievement or challenge title."
+        },
         "name": {
           "type": "string",
-          "maxGraphemes": 64,
-          "maxLength": 200
+          "maxGraphemes": 100,
+          "maxLength": 300,
+          "description": "Localized leaderboard name (or romanized song title, e.g. under `ja-Latn`)."
         },
-        "sortOrder": {
+        "description": {
           "type": "string",
-          "maxLength": 32,
-          "knownValues": ["largerIsBetter", "smallerIsBetter"],
-          "default": "largerIsBetter"
+          "maxGraphemes": 500,
+          "maxLength": 1500,
+          "description": "Localized description."
         },
-        "precision": {
+        "requirement": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "maxLength": 1000,
+          "description": "Localized pre-unlock requirement prompt."
+        }
+      }
+    },
+    "translationMap": {
+      "type": "object",
+      "description": "Optional dictionary map of BCP-47 language tags (e.g. `ja`, `ja-Latn`, `ko`, `zh-Hans`, `es`) to localized `#translation` strings. Keeps primary `title`/`name`/`description` as plain strings for zero-boilerplate indie/jam DX while enabling full global localization.",
+      "properties": {
+        "$keyFormat": {
+          "type": "string",
+          "format": "language",
+          "minLength": 2,
+          "maxLength": 32,
+          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
+        },
+        "$valueType": {
+          "type": "ref",
+          "ref": "#translation",
+          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        }
+      }
+    },
+    "unlockContext": {
+      "type": "object",
+      "description": "Standardized RPG Hall-of-Fame, roguelike victory, cozy catch/build, or narrative clear snapshot attachable via `achievement.unlock#details`.",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "maxLength": 1000,
+          "description": "Short commemorative summary generated by the game (e.g. `Cleared Ascension 20 with Silent · Shiv Deck`)."
+        },
+        "playtimeMs": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 6,
-          "default": 2,
-          "description": "Number of decimal places implied on the integer value."
+          "description": "Elapsed campaign or run playtime in milliseconds when the achievement was earned."
         },
-        "minimum": {
-          "type": "integer",
-          "description": "Minimum valid scaled integer value (e.g. `0`)."
-        },
-        "maximum": {
-          "type": "integer",
-          "description": "Maximum valid scaled integer value (e.g. `10000` for `100.00%`, or `10100` for `101.00%`)."
-        }
-      }
-    },
-    "timeComponentDef": {
-      "type": "object",
-      "description": "Defines an elapsed-time or survival-time component on a multi-component leaderboard.",
-      "required": ["name"],
-      "properties": {
-        "name": {
+        "seed": {
           "type": "string",
-          "maxGraphemes": 64,
-          "maxLength": 200
+          "maxLength": 128,
+          "description": "Optional run or world seed."
         },
-        "sortOrder": {
-          "type": "string",
-          "maxLength": 32,
-          "knownValues": ["largerIsBetter", "smallerIsBetter"],
-          "default": "smallerIsBetter"
-        },
-        "timeUnit": {
-          "type": "string",
-          "maxLength": 32,
-          "knownValues": ["milliseconds", "seconds"],
-          "default": "milliseconds"
-        },
-        "minimum": {
-          "type": "integer"
-        },
-        "maximum": {
-          "type": "integer"
-        }
-      }
-    },
-    "enumComponentDef": {
-      "type": "object",
-      "description": "Defines an ordered categorical component such as rhythm-game clear lamps (`ALL PERFECT`, `FULL COMBO`, `CLEAR`) or letter grades (`S`, `A`, `B`, `C`).",
-      "required": ["name", "values"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "maxGraphemes": 64,
-          "maxLength": 200
-        },
-        "sortOrder": {
-          "type": "string",
-          "maxLength": 32,
-          "knownValues": ["largerIsBetter", "smallerIsBetter"],
-          "default": "smallerIsBetter",
-          "description": "By default (`smallerIsBetter`), earlier entries in `values` (index 0) rank higher."
-        },
-        "values": {
+        "loadout": {
           "type": "array",
-          "minLength": 1,
-          "maxLength": 64,
+          "maxLength": 32,
+          "description": "Optional list of party members, creatures, jokers, relics, or equipment used (e.g. Pokémon Hall-of-Fame party or Balatro Joker lineup).",
           "items": {
-            "type": "ref",
-            "ref": "#enumOption"
+            "type": "string",
+            "maxGraphemes": 64,
+            "maxLength": 200
           }
-        }
-      }
-    },
-    "textComponentDef": {
-      "type": "object",
-      "description": "Defines a display-only text metadata component (e.g. character, modifier list, or seed).",
-      "required": ["name"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "maxGraphemes": 64,
-          "maxLength": 200
         },
-        "maxGraphemes": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 256,
-          "default": 64
-        }
-      }
-    },
-    "scoreComponentDefMap": {
-      "type": "object",
-      "description": "Dictionary map of component key (`record-key` format, 1..32 chars, e.g. `ex-score`, `accuracy`, `lamp`, `clear-time`) to typed component definition. Uses the forward-compatible `$keyFormat`/`$valueType` Lexicon v1 object convention so existing PDS records and DAG-CBOR attestation CIDs require zero migration when the Lexicon `map` schema type ships.",
-      "properties": {
-        "$keyFormat": {
-          "type": "string",
-          "format": "record-key",
-          "minLength": 1,
-          "maxLength": 32,
-          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
-        },
-        "$valueType": {
-          "type": "union",
-          "refs": [
-            "#pointsComponentDef",
-            "#percentageComponentDef",
-            "#timeComponentDef",
-            "#enumComponentDef",
-            "#textComponentDef"
-          ],
-          "closed": false,
-          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
-        }
-      }
-    },
-    "pointsComponentVal": {
-      "type": "object",
-      "description": "Integer points/count value matching a `#pointsComponentDef` entry under the same map key.",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "integer"
-        }
-      }
-    },
-    "percentageComponentVal": {
-      "type": "object",
-      "description": "Scaled fixed-point integer percentage value matching a `#percentageComponentDef` entry under the same map key.",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "integer"
-        }
-      }
-    },
-    "timeComponentVal": {
-      "type": "object",
-      "description": "Integer time duration value matching a `#timeComponentDef` entry under the same map key.",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "integer"
-        }
-      }
-    },
-    "enumComponentVal": {
-      "type": "object",
-      "description": "Enum option `id` matching an `#enumComponentDef` entry under the same map key.",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "string",
-          "format": "record-key",
-          "maxLength": 32
-        }
-      }
-    },
-    "textComponentVal": {
-      "type": "object",
-      "description": "Display text value matching a `#textComponentDef` entry under the same map key.",
-      "required": ["value"],
-      "properties": {
-        "value": {
-          "type": "string",
-          "maxGraphemes": 256,
-          "maxLength": 1000
-        }
-      }
-    },
-    "scoreComponentValMap": {
-      "type": "object",
-      "description": "Dictionary map of component key (`record-key` format, matching `leaderboard.definition#components`) to typed component value (`#pointsComponentVal`, `#percentageComponentVal`, `#timeComponentVal`, `#enumComponentVal`, `#textComponentVal`). Forward-compatible with the proposed Lexicon `map` type without changing wire data or DAG-CBOR attestation CIDs.",
-      "properties": {
-        "$keyFormat": {
-          "type": "string",
-          "format": "record-key",
-          "minLength": 1,
-          "maxLength": 32,
-          "description": "Placeholder schema hint for future Lexicon `map` key validation (never written in records)."
-        },
-        "$valueType": {
-          "type": "union",
-          "refs": [
-            "#pointsComponentVal",
-            "#percentageComponentVal",
-            "#timeComponentVal",
-            "#enumComponentVal",
-            "#textComponentVal"
-          ],
-          "closed": false,
-          "description": "Placeholder schema hint for future Lexicon `map` value validation (never written in records)."
+        "attributes": {
+          "type": "ref",
+          "ref": "#stringMap",
+          "description": "Optional structured key-value context (e.g. `{ \"class\": \"paladin\", \"ending\": \"starlight\", \"fishWeightGrams\": \"14820\" }`)."
         }
       }
     },

@@ -1,0 +1,109 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.challenge.definition",
+  "description": "Canonical metadata for a daily seed, rotating bounty, Game Jam contest, or tournament bracket published in a game's repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Defines a bounded or recurring challenge offered by a game (e.g. Daily Climb seed, Wordle/puzzle #142, 2-week ATProto Game Jam high-score sprint, or weekly boss bounty). Links cleanly to `leaderboard.definition` (via `leaderboard` + `seed` + `dimensions`) and optional `achievement.definition` rewards (`rewardAchievement`).",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["game", "title", "cadence", "createdAt"],
+        "properties": {
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the game definition record (`games.atmosphere.define`) in the publisher's repository."
+          },
+          "title": {
+            "type": "string",
+            "maxGraphemes": 100,
+            "maxLength": 300,
+            "description": "Display title of the challenge (e.g. `Daily Seed #142: Glass Cannon`, `ATProto Game Jam Sprint`)."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 500,
+            "maxLength": 1500,
+            "description": "Rules, modifiers, or objectives for this challenge."
+          },
+          "translations": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#translationMap",
+            "description": "Optional localized `title` and `description` strings keyed by BCP-47 language tag."
+          },
+          "icon": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 1000000,
+            "description": "Optional square badge or banner art for this challenge."
+          },
+          "iconAlt": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000
+          },
+          "cadence": {
+            "type": "string",
+            "maxLength": 32,
+            "knownValues": ["daily", "weekly", "monthly", "seasonal", "event", "permanent"],
+            "description": "Recurrence or lifecycle category of this challenge."
+          },
+          "seed": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional deterministic world/puzzle seed token matched by `leaderboard.score#seed`."
+          },
+          "targetSteps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000,
+            "description": "Optional numeric objective threshold for quest/bounty completion."
+          },
+          "leaderboard": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the `games.opengaming.leaderboard.definition` ranking runs for this challenge."
+          },
+          "rewardAchievement": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of a `games.opengaming.achievement.definition` (typically `countsTowardCompletion: false` when time-limited) awarded for completing this challenge."
+          },
+          "dimensions": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#stringMap",
+            "description": "Optional pinned sub-board dimensions/modifiers required for runs in this challenge (e.g. `{ \"mode\": \"4k\", \"modifiers\": \"mirror\" }`)."
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional timestamp when the challenge opens."
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional timestamp when the challenge closes."
+          },
+          "trustedIssuers": {
+            "type": "array",
+            "maxLength": 32,
+            "items": {
+              "type": "string",
+              "format": "did"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

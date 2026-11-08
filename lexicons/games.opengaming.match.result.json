@@ -1,0 +1,225 @@
+{
+  "lexicon": 1,
+  "id": "games.opengaming.match.result",
+  "description": "A head-to-head, team, or lobby PvP match receipt stored in a participant's repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Published in one or more participants' PDSs after a competitive or asynchronous PvP match (fighting games, chess/board games, TCGs, arena/BR lobbies, racing). Supports publisher/host signing AND serverless peer-to-peer multi-participant DID co-signing (`signatures` signed by every DID in `participants`), Elo/Glicko-2 rating deltas, `matchId` deduplication across opponents' repos, and deterministic `replay` blobs.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["game", "participants", "playedAt"],
+        "properties": {
+          "game": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the game definition record (`games.atmosphere.define`)."
+          },
+          "matchId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional shared deterministic match identifier so AppViews deduplicate copies published across multiple participants' PDSs into one canonical match log."
+          },
+          "leaderboard": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the ranked ladder (`games.opengaming.leaderboard.definition`, typically `rankingMode: \"latest\"`) affected by this match."
+          },
+          "challenge": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional AT-URI of the tournament bracket or event (`games.opengaming.challenge.definition`) this match belonged to."
+          },
+          "mode": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional match format token (e.g. `1v1`, `2v2`, `ffa`, `ranked`, `casual`, `swiss-round-3`)."
+          },
+          "bestOf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99,
+            "description": "Optional set length (e.g. `3` for Best-of-3, `5` for First-to-3 / Best-of-5)."
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional match duration in milliseconds."
+          },
+          "participants": {
+            "type": "array",
+            "minLength": 2,
+            "maxLength": 64,
+            "description": "All competing players/teams in this match (ordered by placement or seat).",
+            "items": {
+              "type": "ref",
+              "ref": "#matchParticipant"
+            }
+          },
+          "dimensions": {
+            "type": "ref",
+            "ref": "games.opengaming.defs#stringMap",
+            "description": "Optional match ruleset, stage, time-control, or format variables (e.g. `{ \"timeControl\": \"3+2\", \"stage\": \"final-destination\" }`)."
+          },
+          "details": {
+            "type": "union",
+            "description": "Optional open-union set/round breakdown (e.g. `#setBreakdown` or a genre-specific PGN, decklist, or combat log object).",
+            "refs": [
+              "#setBreakdown"
+            ],
+            "closed": false
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Optional game balance patch or ruleset version identifier."
+          },
+          "replay": {
+            "type": "blob",
+            "accept": ["*/*"],
+            "maxSize": 2000000,
+            "description": "Optional deterministic match replay, rollback input stream, or PGN/turn log blob."
+          },
+          "playedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the match concluded."
+          },
+          "signatures": {
+            "type": "array",
+            "maxLength": 16,
+            "description": "Optional inline CID-first cryptographic attestations (`games.opengaming.defs#inlineSignature`). May be signed by the game publisher / tournament host OR peer-to-peer co-signed by every DID in `participants`.",
+            "items": {
+              "type": "union",
+              "refs": [
+                "games.opengaming.defs#inlineSignature"
+              ],
+              "closed": false
+            }
+          }
+        }
+      }
+    },
+    "matchParticipant": {
+      "type": "object",
+      "description": "Outcome, placement, character/deck, and optional rating delta for one participant in a `match.result`.",
+      "required": ["outcome"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "AT Protocol DID of the participant (optional for local guests or AI bots)."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional display name or guest tag."
+        },
+        "team": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional team identifier (e.g. `blue`, `red`, `team-alpha`)."
+        },
+        "role": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional seat, side, or role (e.g. `white`, `black`, `p1`, `support`)."
+        },
+        "character": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional fighter, archetype, deck, or faction played."
+        },
+        "outcome": {
+          "type": "string",
+          "maxLength": 32,
+          "knownValues": ["win", "loss", "draw", "forfeit", "dnf", "completed"],
+          "description": "Result for this participant."
+        },
+        "placement": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional `1..N` finish order for free-for-all, racing, or battle-royale lobbies."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Optional games, rounds, stocks, or points won in this match (e.g. `2` in a `2-1` set)."
+        },
+        "scoreText": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 128,
+          "description": "Optional formatted score or tiebreak text."
+        },
+        "ratingBefore": {
+          "type": "integer",
+          "description": "Optional pre-match skill rating (e.g. Elo `1650` or scaled Glicko-2)."
+        },
+        "ratingAfter": {
+          "type": "integer",
+          "description": "Optional post-match skill rating (e.g. Elo `1668`)."
+        },
+        "ratingDeviation": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional post-match Glicko-2 rating deviation (`RD`)."
+        }
+      }
+    },
+    "roundResult": {
+      "type": "object",
+      "description": "Result of an individual game/round inside a multi-game set.",
+      "required": ["index"],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stage": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200
+        },
+        "winnerDid": {
+          "type": "string",
+          "format": "did"
+        },
+        "winnerTeam": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "summary": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "maxLength": 400
+        }
+      }
+    },
+    "setBreakdown": {
+      "type": "object",
+      "description": "Standardized round-by-round breakdown for fighting, card, board, or esports sets, attachable via `match.result#details`.",
+      "required": ["rounds"],
+      "properties": {
+        "rounds": {
+          "type": "array",
+          "minLength": 1,
+          "maxLength": 64,
+          "items": {
+            "type": "ref",
+            "ref": "#roundResult"
+          }
+        },
+        "notation": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Optional algebraic notation (e.g. Chess PGN) or compact turn summary."
+        }
+      }
+    }
+  }
+}
