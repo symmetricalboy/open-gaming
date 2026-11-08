@@ -207,5 +207,20 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
     CREATE INDEX IF NOT EXISTS idx_revocations_cid ON revocations(attestation_cid);
   `);
 
+  // Purge any legacy dummy/showcase rows (`is_demo = 1`) from persistent SQLite databases
+  db.exec(`
+    DELETE FROM follows
+    WHERE follower_did IN (SELECT did FROM actors WHERE is_demo = 1)
+       OR subject_did IN (SELECT did FROM actors WHERE is_demo = 1);
+    DELETE FROM achievement_unlocks WHERE is_demo = 1;
+    DELETE FROM achievement_progress WHERE is_demo = 1;
+    DELETE FROM leaderboard_scores WHERE is_demo = 1;
+    DELETE FROM revocations WHERE is_demo = 1;
+    DELETE FROM achievement_definitions WHERE is_demo = 1;
+    DELETE FROM leaderboard_definitions WHERE is_demo = 1;
+    DELETE FROM games WHERE is_demo = 1;
+    DELETE FROM actors WHERE is_demo = 1;
+  `);
+
   return db;
 }

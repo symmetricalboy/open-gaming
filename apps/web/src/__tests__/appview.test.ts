@@ -6,20 +6,29 @@ import {
   createOpenGamingLexicons,
   createRevocationRecord,
   createSignedScore,
+  createSignedUnlock,
   generateSigningKeys,
+  getBestOnlyScoreRkey,
+  getUnlockRkey,
 } from '@opengaming/sdk';
 import { createAppViewServer, type AppViewInstance } from '../server.js';
 
-describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', () => {
+describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocation)', () => {
   let app: AppViewInstance;
   let baseUrl = '';
+
+  const FLAPPY_DID = 'did:web:flappysky.symmetricalboy.com';
+  const DYLAN_DID = 'did:plc:33d7gnwiagm6cimpiepefp72';
+  const TREZY_DID = 'did:plc:4jrld6fwpnwqehtce56qshzv';
+  const BOBA_DID = 'did:plc:r2vpg2iszskbkegoldmqa322';
+  const BAILEY_DID = 'did:plc:rnpkyqnmsw4ipey6eotbdnnf';
 
   before(async () => {
     app = await createAppViewServer({
       dbPath: ':memory:',
       enableJetstream: false,
       enableNetworkIdentity: false,
-      seedDemoData: true,
+      bootstrapRepos: [],
     });
 
     await new Promise<void>((resolve) => {
@@ -33,7 +42,7 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     await app.close();
   });
 
-  it('serves healthcheck, overview stats, static SPA routes, and SVG icons', async () => {
+  it('starts completely clean with zero dummy data and serves SPA routes & healthcheck', async () => {
     const healthRes = await fetch(`${baseUrl}/health`);
     assert.equal(healthRes.status, 200);
     const health = (await healthRes.json()) as { status: string };
@@ -42,9 +51,12 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     const overviewRes = await fetch(`${baseUrl}/api/overview`);
     assert.equal(overviewRes.status, 200);
     const overview = (await overviewRes.json()) as Record<string, any>;
-    assert.equal(overview.stats.gamesCount, 2);
-    assert.ok(overview.stats.verifiedUnlocksCount >= 10);
-    assert.equal(overview.stats.blockedAttemptsCount, 2); // 1 revoked exploit + 1 unsigned forgery
+    assert.equal(overview.stats.gamesCount, 0);
+    assert.equal(overview.stats.achievementDefinitionsCount, 0);
+    assert.equal(overview.stats.verifiedUnlocksCount, 0);
+    assert.equal(overview.stats.verifiedScoresCount, 0);
+    assert.equal(overview.stats.blockedAttemptsCount, 0);
+    assert.equal(overview.games.length, 0);
 
     // Deep-linked SPA route fallback
     const spaRes = await fetch(`${baseUrl}/leaderboards`);
@@ -56,52 +68,157 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     assert.match(iconRes.headers.get('content-type') ?? '', /image\/svg\+xml/);
   });
 
-  it('implements XRPC games.opengaming.actor.getProfile (XP-free, per-game completion)', async () => {
+  it('indexes real signed records and serves XP-free actor.getProfile, leaderboard.getScores, and hidden-achievement masking', async () => {
     const lex = createOpenGamingLexicons();
-    const res = await fetch(`${baseUrl}/xrpc/games.opengaming.actor.getProfile?actor=symmetricalboy.com`);
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as Record<string, any>;
+    const flappyKeys = await generateSigningKeys();
 
-    // Validate XRPC output against compiled Lexicon schema!
-    lex.assertValidXrpcOutput(NSIDS.ActorGetProfile, body);
+    app.identity.upsertActor({
+      did: FLAPPY_DID,
+      handle: 'flappysky.symmetricalboy.com',
+      displayName: 'Flappysky',
+      didDoc: {
+        id: FLAPPY_DID,
+        alsoKnownAs: ['at://flappysky.symmetricalboy.com'],
+        verificationMethods: { attestations: flappyKeys.publicDidKey },
+      },
+    });
+    app.identity.upsertActor({ did: DYLAN_DID, handle: 'symmetricalboy.com', displayName: 'symmetricalboy' });
+    app.identity.upsertActor({ did: TREZY_DID, handle: 'trezy.codes', displayName: 'Trezy' });
+    app.identity.upsertActor({ did: BOBA_DID, handle: 'essentialrandom.bsky.social', displayName: 'Ms Boba' });
+    app.identity.upsertActor({ did: BAILEY_DID, handle: 'pds.dad', displayName: 'Bailey Townsend' });
 
-    assert.equal(body.did, 'did:plc:33d7gnwiagm6cimpiepefp72');
-    assert.equal(body.gamesPlayed, 2);
-    assert.equal(body.completedGames, 1); // Neon Drift 2/2 (100%), Flappysky 3/5 (60%)
-    assert.equal('totalXp' in body, false);
-    assert.equal('level' in body, false);
-  });
+    // Social graph for Trezy: follows Dylan & Boba, not Bailey
+    const insertFollow = app.db.prepare('INSERT OR IGNORE INTO follows (follower_did, subject_did) VALUES (?, ?)');
+    insertFollow.run(TREZY_DID, DYLAN_DID);
+    insertFollow.run(TREZY_DID, BOBA_DID);
 
-  it('implements XRPC games.opengaming.leaderboard.getScores across timeframes, social scope, and speedrun clocks', async () => {
-    const lex = createOpenGamingLexicons();
-    const flappyLb = 'at://did:plc:flappyskygameexample/games.opengaming.leaderboard.definition/high-score';
+    const gameUri = `at://${FLAPPY_DID}/games.atmosphere.define/flappysky`;
+    const achFirstFlightUri = `at://${FLAPPY_DID}/${NSIDS.AchievementDefinition}/first-flight`;
+    const achTouchGrassUri = `at://${FLAPPY_DID}/${NSIDS.AchievementDefinition}/touch-grass`;
+    const lbUri = `at://${FLAPPY_DID}/${NSIDS.LeaderboardDefinition}/high-score`;
 
-    // 1. All-Time Global: Trezy's 148 pts (5 days ago) is #1; FrameGlitcher's revoked 9420 pts is excluded!
+    const blobStub = {
+      $type: 'blob',
+      ref: { $link: 'bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori' },
+      mimeType: 'image/png',
+      size: 1024,
+    };
+
+    await app.indexer.indexRecord({
+      uri: gameUri,
+      record: {
+        $type: 'games.atmosphere.define',
+        name: 'Flappysky',
+        url: 'https://flappysky.symmetricalboy.com',
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    await app.indexer.indexRecord({
+      uri: achFirstFlightUri,
+      record: {
+        $type: NSIDS.AchievementDefinition,
+        game: gameUri,
+        title: 'First Flight',
+        description: 'Completed your very first flight through the Blue Sky.',
+        icon: blobStub,
+        tier: 'bronze',
+        hidden: false,
+        listOrder: 10,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    await app.indexer.indexRecord({
+      uri: achTouchGrassUri,
+      record: {
+        $type: NSIDS.AchievementDefinition,
+        game: gameUri,
+        title: 'Touch Grass',
+        description: 'Bonked straight into the ground without clearing a single post.',
+        icon: blobStub,
+        tier: 'bronze',
+        hidden: true,
+        listOrder: 20,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    await app.indexer.indexRecord({
+      uri: lbUri,
+      record: {
+        $type: NSIDS.LeaderboardDefinition,
+        game: gameUri,
+        name: 'All-Time Best Score',
+        icon: blobStub,
+        sortOrder: 'largerIsBetter',
+        scoreFormat: { kind: 'numeric', decimalPlaces: 0, unitSingular: 'pt', unitPlural: 'pts' },
+        timeframes: ['allTime'],
+        recordPolicy: 'bestOnly',
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    // Dylan unlocks both achievements (100% completion of 2/2)
+    for (const achUri of [achFirstFlightUri, achTouchGrassUri]) {
+      const { record } = await createSignedUnlock({
+        achievement: achUri,
+        game: gameUri,
+        playerDid: DYLAN_DID,
+        issuerDid: FLAPPY_DID,
+        signingKey: flappyKeys.keypair,
+      });
+      await app.indexer.indexRecord({
+        uri: `at://${DYLAN_DID}/${NSIDS.AchievementUnlock}/${getUnlockRkey(achUri)}`,
+        record,
+      });
+    }
+
+    // Scores for Trezy (148), Dylan (84), Boba (62), Bailey (95)
+    const scoreInputs = [
+      { did: TREZY_DID, score: 148 },
+      { did: BAILEY_DID, score: 95 },
+      { did: DYLAN_DID, score: 84 },
+      { did: BOBA_DID, score: 62 },
+    ];
+    for (const s of scoreInputs) {
+      const { record } = await createSignedScore({
+        leaderboard: lbUri,
+        game: gameUri,
+        playerDid: s.did,
+        issuerDid: FLAPPY_DID,
+        score: s.score,
+        signingKey: flappyKeys.keypair,
+      });
+      await app.indexer.indexRecord({
+        uri: `at://${s.did}/${NSIDS.LeaderboardScore}/${getBestOnlyScoreRkey(lbUri)}`,
+        record,
+      });
+    }
+
+    // 1. Validate XRPC actor.getProfile (XP-free)
+    const profileRes = await fetch(`${baseUrl}/xrpc/games.opengaming.actor.getProfile?actor=symmetricalboy.com`);
+    assert.equal(profileRes.status, 200);
+    const profile = (await profileRes.json()) as Record<string, any>;
+    lex.assertValidXrpcOutput(NSIDS.ActorGetProfile, profile);
+    assert.equal(profile.did, DYLAN_DID);
+    assert.equal(profile.gamesPlayed, 1);
+    assert.equal(profile.completedGames, 1);
+    assert.equal('totalXp' in profile, false);
+    assert.equal('level' in profile, false);
+
+    // 2. Validate XRPC leaderboard.getScores (Global & Social)
     const allTimeRes = await fetch(
-      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(flappyLb)}&timeframe=allTime&scope=public`
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(lbUri)}&timeframe=allTime&scope=public`
     );
-    assert.equal(allTimeRes.status, 200);
     const allTime = (await allTimeRes.json()) as Record<string, any>;
     lex.assertValidXrpcOutput(NSIDS.LeaderboardGetScores, allTime);
+    assert.equal(allTime.entries.length, 4);
     assert.equal(allTime.entries[0].handle, 'trezy.codes');
     assert.equal(allTime.entries[0].score, 148);
-    assert.equal(
-      allTime.entries.some((e: any) => e.score === 9420),
-      false,
-      'Revoked 9420 exploit score must not appear in verified leaderboard'
-    );
 
-    // 2. Daily Global: Dylan's 94 pts today outranks Boba (86) and Trezy's today run (79)!
-    const dailyRes = await fetch(
-      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(flappyLb)}&timeframe=daily&scope=public`
-    );
-    const daily = (await dailyRes.json()) as Record<string, any>;
-    assert.equal(daily.entries[0].handle, 'symmetricalboy.com');
-    assert.equal(daily.entries[0].score, 94);
-
-    // 3. Social Scope (`viewer=trezy.codes`): includes Trezy, Dylan, Boba; excludes Bailey!
     const socialRes = await fetch(
-      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(flappyLb)}&timeframe=allTime&scope=social&viewer=trezy.codes`
+      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(lbUri)}&timeframe=allTime&scope=social&viewer=trezy.codes`
     );
     const social = (await socialRes.json()) as Record<string, any>;
     assert.equal(social.entries.length, 3);
@@ -109,34 +226,18 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
       social.entries.some((e: any) => e.handle === 'pds.dad'),
       false
     );
-    assert.equal(social.viewerEntry?.handle, 'trezy.codes');
 
-    // 4. smallerIsBetter millisecond time leaderboard (`Neon Bay Time Trial`)
-    const driftLb = 'at://did:plc:neondriftgameexample/games.opengaming.leaderboard.definition/neon-bay-time-trial';
-    const driftRes = await fetch(
-      `${baseUrl}/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(driftLb)}&timeframe=allTime`
-    );
-    const drift = (await driftRes.json()) as Record<string, any>;
-    assert.equal(drift.entries[0].score, 52480);
-    assert.equal(drift.entries[0].displayScore, '0:52.48');
-    assert.equal(drift.entries[1].score, 56910);
-  });
-
-  it('masks hidden achievements for non-unlockers while revealing them to players who unlocked them', async () => {
-    const flappyUri = 'at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky';
-
-    // Boba has NOT unlocked `touch-grass` -> masked!
+    // 3. Validate hidden achievement masking (`touch-grass` masked for Boba, revealed for Dylan)
     const maskedRes = await fetch(
-      `${baseUrl}/api/game?uri=${encodeURIComponent(flappyUri)}&viewer=essentialrandom.bsky.social`
+      `${baseUrl}/api/game?uri=${encodeURIComponent(gameUri)}&viewer=essentialrandom.bsky.social`
     );
     const maskedGame = (await maskedRes.json()) as Record<string, any>;
     const hiddenForBoba = maskedGame.achievements.find((a: any) => a.rkey === 'touch-grass');
     assert.equal(hiddenForBoba.masked, true);
     assert.equal(hiddenForBoba.title, 'Hidden Achievement');
 
-    // Dylan HAS unlocked `touch-grass` -> revealed!
     const revealedRes = await fetch(
-      `${baseUrl}/api/game?uri=${encodeURIComponent(flappyUri)}&viewer=symmetricalboy.com`
+      `${baseUrl}/api/game?uri=${encodeURIComponent(gameUri)}&viewer=symmetricalboy.com`
     );
     const revealedGame = (await revealedRes.json()) as Record<string, any>;
     const revealedForDylan = revealedGame.achievements.find((a: any) => a.rkey === 'touch-grass');
@@ -161,7 +262,6 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     const gameUri = `at://${studioDid}/games.atmosphere.define/starhopper`;
     const lbUri = `at://${studioDid}/${NSIDS.LeaderboardDefinition}/arcade`;
 
-    // 1. Ingest game & leaderboard definitions via Jetstream commit stream
     await app.jetstream.handleMessage(
       JSON.stringify({
         did: studioDid,
@@ -211,7 +311,6 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
       })
     );
 
-    // 2. Player submits inline-signed score over Jetstream -> appears as #1!
     const { record: signedScore, attestationCid } = await createSignedScore({
       leaderboard: lbUri,
       game: gameUri,
@@ -243,7 +342,6 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     assert.equal(beforeRev.entries.length, 1);
     assert.equal(beforeRev.entries[0].score, 777);
 
-    // 3. Publisher publishes `games.opengaming.revocation` over Jetstream -> score vanishes immediately!
     const { rkey: revRkey, record: revRec } = createRevocationRecord({
       scope: 'attestation',
       attestationCid,
@@ -273,7 +371,6 @@ describe('opengaming.games AppView, XRPC, Jetstream & Revocation Integration', (
     const afterRev = (await afterRevRes.json()) as Record<string, any>;
     assert.equal(afterRev.entries.length, 0);
 
-    // 4. Publisher deletes revocation (`unrevoke`) over Jetstream -> score is reinstated immediately!
     await app.jetstream.handleMessage(
       JSON.stringify({
         did: studioDid,

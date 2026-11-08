@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { Lexicons, type LexiconDoc } from '@atproto/lexicon';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_LEXICONS_DIR = path.resolve(__dirname, '../../../lexicons');
+const BUNDLED_LEXICONS_DIR = path.resolve(__dirname, '../lexicons');
+const MONOREPO_LEXICONS_DIR = path.resolve(__dirname, '../../../lexicons');
+const DEFAULT_LEXICONS_DIR = fs.existsSync(BUNDLED_LEXICONS_DIR)
+  ? BUNDLED_LEXICONS_DIR
+  : MONOREPO_LEXICONS_DIR;
 
 /**
  * Load all `games.opengaming.*` Lexicon JSON documents from disk (defaults to repo `lexicons/`).

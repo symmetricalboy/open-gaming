@@ -225,16 +225,17 @@ async function renderOverview() {
     ? `Jetstream Live (${data.jetstream.eventsProcessed} events)`
     : 'Jetstream Standby · Local SQLite Ready';
 
-  const gamesHtml = data.games
-    .map(
-      (g) => `
+  const gamesSectionBody = data.games.length
+    ? `<ul class="cards-grid" role="list">${data.games
+        .map(
+          (g) => `
       <li class="card">
         <div class="card-row">
           <img src="${esc(g.iconUrl || '/assets/icons/locked.svg')}" alt="${esc(g.name)} icon" width="56" height="56" class="game-icon">
           <div>
             <div class="pill-row">
               <h3><a href="/game?uri=${encodeURIComponent(g.uri)}" data-nav="/game?uri=${encodeURIComponent(g.uri)}">${esc(g.name)}</a></h3>
-              ${g.isDemo ? '<span class="badge">Reference Demo</span>' : '<span class="badge">Live ATProto</span>'}
+              <span class="badge">Live ATProto</span>
             </div>
             <p class="muted-text">${esc(g.tagline || '')}</p>
           </div>
@@ -255,22 +256,29 @@ async function renderOverview() {
         </div>
       </li>
     `
-    )
-    .join('');
+        )
+        .join('')}</ul>`
+    : '<p class="card muted-text">No games indexed yet. Click <strong>Sync PDS</strong> to index a live ATProto game repository.</p>';
 
-  const actorsHtml = data.featuredActors
-    .map(
-      (a) => `
-      <a href="/player?actor=${encodeURIComponent(a.handle || a.did)}" data-nav="/player?actor=${encodeURIComponent(a.handle || a.did)}" class="btn btn-subtle">
-        @${esc(a.handle || a.displayName)} &middot; ${Number(a.unlocks)} Trophies
-      </a>
-    `
-    )
-    .join('');
+  const actorsRowHtml = data.featuredActors.length
+    ? `<div class="pill-row">
+         <span class="muted-text">Explore Gamercards:</span>
+         ${data.featuredActors
+           .map(
+             (a) => `
+             <a href="/player?actor=${encodeURIComponent(a.handle || a.did)}" data-nav="/player?actor=${encodeURIComponent(a.handle || a.did)}" class="btn btn-subtle">
+               @${esc(a.handle || a.displayName)} &middot; ${Number(a.unlocks)} Trophies
+             </a>
+           `
+           )
+           .join('')}
+       </div>`
+    : '';
 
-  const unlocksHtml = data.recentUnlocks
-    .map(
-      (u) => `
+  const unlocksBody = data.recentUnlocks.length
+    ? `<ul class="feed-list" role="list">${data.recentUnlocks
+        .map(
+          (u) => `
       <li class="feed-item">
         <div class="card-row">
           <img src="${esc(u.iconUrl || '/assets/icons/locked.svg')}" alt="${esc(u.iconAlt)}" width="42" height="42" class="ach-icon" loading="lazy">
@@ -291,12 +299,14 @@ async function renderOverview() {
         </button>
       </li>
     `
-    )
-    .join('');
+        )
+        .join('')}</ul>`
+    : '<p class="muted-text">No verified achievements unlocked yet — launch a game and connect your ATProto account to earn the first trophy.</p>';
 
-  const scoresHtml = data.recentScores
-    .map(
-      (s) => `
+  const scoresBody = data.recentScores.length
+    ? `<ul class="feed-list" role="list">${data.recentScores
+        .map(
+          (s) => `
       <li class="feed-item">
         <div>
           <div>
@@ -313,8 +323,9 @@ async function renderOverview() {
         </button>
       </li>
     `
-    )
-    .join('');
+        )
+        .join('')}</ul>`
+    : '<p class="muted-text">No verified leaderboard scores recorded yet.</p>';
 
   return `
     <section class="hero-banner">
@@ -354,10 +365,7 @@ async function renderOverview() {
         </div>
       </div>
 
-      <div class="pill-row">
-        <span class="muted-text">Explore Gamercards:</span>
-        ${actorsHtml}
-      </div>
+      ${actorsRowHtml}
     </section>
 
     <section class="section-block">
@@ -365,7 +373,7 @@ async function renderOverview() {
         <h2>Games Catalog</h2>
         <a href="/games" data-nav="/games">View all games &rarr;</a>
       </div>
-      <ul class="cards-grid" role="list">${gamesHtml}</ul>
+      ${gamesSectionBody}
     </section>
 
     <div class="two-col-grid">
@@ -373,7 +381,7 @@ async function renderOverview() {
         <div class="section-header">
           <h2>Recent Verified Unlocks</h2>
         </div>
-        <ul class="feed-list" role="list">${unlocksHtml}</ul>
+        ${unlocksBody}
       </section>
 
       <section class="card">
@@ -381,7 +389,7 @@ async function renderOverview() {
           <h2>Recent High Scores</h2>
           <a href="/leaderboards" data-nav="/leaderboards">Full leaderboards &rarr;</a>
         </div>
-        <ul class="feed-list" role="list">${scoresHtml}</ul>
+        ${scoresBody}
       </section>
     </div>
   `;
@@ -391,9 +399,10 @@ async function renderGamesCatalog() {
   document.title = 'Games Catalog | opengaming.games';
   const { games } = await fetchJson('/api/games');
 
-  const items = games
-    .map(
-      (g) => `
+  const catalogBody = games.length
+    ? `<ul class="cards-grid" role="list">${games
+        .map(
+          (g) => `
       <li class="card">
         <div class="card-row">
           <img src="${esc(g.iconUrl || '/assets/icons/locked.svg')}" alt="${esc(g.name)} icon" width="60" height="60" class="game-icon">
@@ -414,8 +423,9 @@ async function renderGamesCatalog() {
         </div>
       </li>
     `
-    )
-    .join('');
+        )
+        .join('')}</ul>`
+    : '<p class="card muted-text">No games indexed yet. Click <strong>Sync PDS</strong> to index a live ATProto game repository.</p>';
 
   return `
     <div class="section-header">
@@ -424,7 +434,7 @@ async function renderGamesCatalog() {
         <p class="muted-text">Games publishing <code>games.atmosphere.define</code> alongside <code>games.opengaming.*</code> achievements and leaderboards.</p>
       </div>
     </div>
-    <ul class="cards-grid" role="list">${items}</ul>
+    ${catalogBody}
   `;
 }
 
@@ -507,19 +517,23 @@ async function renderGameDetail(searchParams) {
             Open Full Board &rarr;
           </a>
         </div>
-        <ol class="feed-list">
-          ${lb.entries
-            .slice(0, 5)
-            .map(
-              (e) => `
-              <li class="feed-item">
-                <span><strong>#${Number(e.rank)}</strong> <a href="/player?actor=${encodeURIComponent(e.handle || e.player)}" data-nav="/player?actor=${encodeURIComponent(e.handle || e.player)}">@${esc(e.handle || e.displayName)}</a></span>
-                <span class="score-mono">${esc(e.displayScore)}</span>
-              </li>
-            `
-            )
-            .join('')}
-        </ol>
+        ${
+          lb.entries.length
+            ? `<ol class="feed-list">
+                ${lb.entries
+                  .slice(0, 5)
+                  .map(
+                    (e) => `
+                    <li class="feed-item">
+                      <span><strong>#${Number(e.rank)}</strong> <a href="/player?actor=${encodeURIComponent(e.handle || e.player)}" data-nav="/player?actor=${encodeURIComponent(e.handle || e.player)}">@${esc(e.handle || e.displayName)}</a></span>
+                      <span class="score-mono">${esc(e.displayScore)}</span>
+                    </li>
+                  `
+                  )
+                  .join('')}
+              </ol>`
+            : '<p class="muted-text">No verified scores recorded yet.</p>'
+        }
       </div>
     `
     )
@@ -532,7 +546,7 @@ async function renderGameDetail(searchParams) {
         <div style="flex: 1;">
           <div class="pill-row">
             <h1 id="view-heading" tabindex="-1">${esc(data.game.name)}</h1>
-            ${data.game.isDemo ? '<span class="badge">Reference Demo</span>' : '<span class="badge">Live ATProto</span>'}
+            <span class="badge">Live ATProto</span>
           </div>
           <p class="muted-text">${esc(data.game.description || data.game.tagline || '')}</p>
           <div class="pill-row">
@@ -552,7 +566,7 @@ async function renderGameDetail(searchParams) {
           ${
             viewer
               ? `<a href="/game?uri=${encodeURIComponent(uri)}" data-nav="/game?uri=${encodeURIComponent(uri)}" class="btn">Clear</a>`
-              : `<a href="/game?uri=${encodeURIComponent(uri)}&viewer=symmetricalboy.com" data-nav="/game?uri=${encodeURIComponent(uri)}&viewer=symmetricalboy.com" class="btn">Demo as @symmetricalboy.com</a>`
+              : ''
           }
         </form>
         <a href="${esc(toggleSpoilerUrl)}" data-nav="${esc(toggleSpoilerUrl)}" class="btn btn-subtle">
@@ -902,8 +916,8 @@ async function renderAuditLedger() {
   document.title = 'Revocations & Anti-Cheat Ledger | opengaming.games';
   const data = await fetchJson('/api/audit');
 
-  const revHtml = data.revocations.length
-    ? data.revocations
+  const revBody = data.revocations.length
+    ? `<ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${data.revocations
         .map(
           (r) => `
           <li class="card">
@@ -925,11 +939,11 @@ async function renderAuditLedger() {
           </li>
         `
         )
-        .join('')
-    : '<li class="card muted-text">No revocations published.</li>';
+        .join('')}</ul>`
+    : '<p class="card muted-text">No revocations published.</p>';
 
-  const rejectedHtml = data.rejectedRecords.length
-    ? data.rejectedRecords
+  const rejectedBody = data.rejectedRecords.length
+    ? `<ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${data.rejectedRecords
         .map(
           (rec) => `
           <li class="card">
@@ -944,8 +958,8 @@ async function renderAuditLedger() {
           </li>
         `
         )
-        .join('')
-    : '<li class="card muted-text">No rejected or revoked records observed.</li>';
+        .join('')}</ul>`
+    : '<p class="card muted-text">No rejected or revoked records observed.</p>';
 
   return `
     <div class="section-header">
@@ -960,12 +974,12 @@ async function renderAuditLedger() {
     <div class="two-col-grid">
       <section>
         <h2>Published Revocations (<code>games.opengaming.revocation</code>)</h2>
-        <ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${revHtml}</ul>
+        ${revBody}
       </section>
 
       <section>
         <h2>Excluded Player Records (Revoked or Unverified)</h2>
-        <ul class="cards-grid" role="list" style="grid-template-columns: 1fr;">${rejectedHtml}</ul>
+        ${rejectedBody}
       </section>
     </div>
   `;
@@ -973,7 +987,15 @@ async function renderAuditLedger() {
 
 async function renderDevelopers() {
   document.title = 'Lexicons & XRPC API | opengaming.games';
-  const { lexicons } = await fetchJson('/api/lexicons');
+  const [{ lexicons }, { leaderboards }] = await Promise.all([
+    fetchJson('/api/lexicons'),
+    fetchJson('/api/leaderboards').catch(() => ({ leaderboards: [] })),
+  ]);
+
+  const liveLbUri =
+    leaderboards?.[0]?.uri ||
+    'at://did:web:flappysky.symmetricalboy.com/games.opengaming.leaderboard.definition/high-score';
+  const liveLbQuery = `/xrpc/games.opengaming.leaderboard.getScores?leaderboard=${encodeURIComponent(liveLbUri)}&timeframe=allTime&scope=public`;
 
   const schemasHtml = lexicons
     .map(
@@ -1007,8 +1029,8 @@ async function renderDevelopers() {
           </a>
         </li>
         <li>
-          <a href="/xrpc/games.opengaming.leaderboard.getScores?leaderboard=at%3A%2F%2Fdid%3Aplc%3Aflappyskygameexample%2Fgames.opengaming.leaderboard.definition%2Fhigh-score&timeframe=allTime&scope=public" target="_blank" rel="noopener">
-            <code>GET /xrpc/games.opengaming.leaderboard.getScores?leaderboard=...&amp;timeframe=allTime&amp;scope=public</code>
+          <a href="${esc(liveLbQuery)}" target="_blank" rel="noopener">
+            <code>GET /xrpc/games.opengaming.leaderboard.getScores?leaderboard=${esc(liveLbUri)}&amp;timeframe=allTime&amp;scope=public</code>
           </a>
         </li>
       </ul>

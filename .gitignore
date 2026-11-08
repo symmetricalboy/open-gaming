@@ -10,3 +10,5 @@ coverage/
 *.sqlite-shm
 *.sqlite-wal
 apps/web/data/
+packages/sdk/lexicons/
+*.tgz

@@ -16,10 +16,11 @@
   },
   "files": [
     "dist",
+    "lexicons",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"import('node:fs').then(fs => fs.cpSync('../../lexicons', './lexicons', { recursive: true }))\"",
     "test": "tsx --test src/__tests__/*.test.ts",
     "validate": "tsx src/cli.ts validate"
   },

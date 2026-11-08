@@ -9,7 +9,6 @@ import { OpenGamingIndexer } from './indexer.js';
 import { AppViewQueries } from './queries.js';
 import { JetstreamConsumer } from './jetstream.js';
 import { getBuiltInIconSvg } from './icons.js';
-import { seedShowcaseData } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -68,24 +67,52 @@ export async function createAppViewServer(options?: {
   dbPath?: string;
   enableJetstream?: boolean;
   enableNetworkIdentity?: boolean;
-  seedDemoData?: boolean;
+  bootstrapRepos?: string[];
 }): Promise<AppViewInstance> {
   const db = createDatabase(options?.dbPath ?? process.env.DATABASE_PATH ?? ':memory:');
+  const enableNetwork = options?.enableNetworkIdentity ?? process.env.DISABLE_NETWORK_IDENTITY !== 'true';
   const identity = new IdentityService(db, {
-    enableNetwork: options?.enableNetworkIdentity ?? process.env.DISABLE_NETWORK_IDENTITY !== 'true',
+    enableNetwork,
   });
   const indexer = new OpenGamingIndexer(db, identity);
   const queries = new AppViewQueries(db, identity);
   const jetstream = new JetstreamConsumer(db, indexer);
 
-  const shouldSeed = options?.seedDemoData ?? process.env.SEED_DEMO_DATA !== 'false';
-  if (shouldSeed) {
-    await seedShowcaseData({ db, identity, indexer });
-  }
-
   const enableJetstream = options?.enableJetstream ?? process.env.ENABLE_JETSTREAM !== 'false';
   if (enableJetstream) {
     jetstream.start();
+  }
+
+  const bootstrapRepos =
+    options?.bootstrapRepos ??
+    (enableNetwork
+      ? (process.env.BOOTSTRAP_REPOS ?? 'did:web:flappysky.symmetricalboy.com')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : []);
+
+  const bootstrapTimers: NodeJS.Timeout[] = [];
+  if (bootstrapRepos.length > 0) {
+    const syncBootstrap = async (attempt = 1) => {
+      let needsRetry = false;
+      for (const actor of bootstrapRepos) {
+        try {
+          const out = await indexer.syncActorRepository(actor);
+          if (out.totalIndexed === 0) {
+            needsRetry = true;
+          }
+        } catch {
+          needsRetry = true;
+        }
+      }
+      if (needsRetry && attempt < 3) {
+        const timer = setTimeout(() => void syncBootstrap(attempt + 1), attempt * 10_000);
+        timer.unref?.();
+        bootstrapTimers.push(timer);
+      }
+    };
+    void syncBootstrap(1);
   }
 
   const lexiconDocs = loadOpenGamingLexiconDocs();
@@ -399,6 +426,9 @@ export async function createAppViewServer(options?: {
   });
 
   const close = async () => {
+    for (const timer of bootstrapTimers) {
+      clearTimeout(timer);
+    }
     jetstream.stop();
     await new Promise<void>((resolve) => {
       if (!server.listening) {

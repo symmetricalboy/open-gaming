@@ -117,19 +117,19 @@ export class IdentityService {
   }
 
   /**
-   * Resolve a DID document (checking local SQLite cache first so seeded/offline keys work instantaneously,
+   * Resolve a DID document (checking local SQLite cache first when `forceRefresh` is false,
    * then resolving via PLC/did:web over the network).
    */
-  async resolveDidDocument(did: string): Promise<Record<string, unknown> | null> {
+  async resolveDidDocument(did: string, forceRefresh = false): Promise<Record<string, unknown> | null> {
     const cached = this.getCachedActor(did);
-    if (cached?.didDoc) {
+    if (!forceRefresh && cached?.didDoc) {
       return cached.didDoc;
     }
     if (!this.enableNetwork) {
-      return null;
+      return cached?.didDoc ?? null;
     }
     try {
-      const doc = (await this.didResolver.resolve(did)) as Record<string, unknown> | null;
+      const doc = (await this.didResolver.resolve(did, forceRefresh)) as Record<string, unknown> | null;
       if (doc) {
         const pdsUrl = extractPdsFromDidDoc(doc);
         const handle = extractHandleFromDidDoc(doc);
@@ -137,7 +137,7 @@ export class IdentityService {
       }
       return doc;
     } catch {
-      return null;
+      return cached?.didDoc ?? null;
     }
   }
 
@@ -184,7 +184,7 @@ export class IdentityService {
 
     if (!did) return cached;
 
-    const didDoc = await this.resolveDidDocument(did);
+    const didDoc = await this.resolveDidDocument(did, forceRefresh);
     const pdsUrl = extractPdsFromDidDoc(didDoc) ?? cached?.pdsUrl;
     let handle = extractHandleFromDidDoc(didDoc) ?? (clean.startsWith('did:') ? cached?.handle : clean);
     let displayName = cached?.displayName;
