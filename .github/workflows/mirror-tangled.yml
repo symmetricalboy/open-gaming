@@ -1,0 +1,35 @@
+name: Mirror to Tangled
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-tangled
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Push main & tags to Tangled.org
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Tangled Knot
+        env:
+          TANGLED_SSH_KEY: ${{ secrets.TANGLED_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$TANGLED_SSH_KEY" > ~/.ssh/id_ed25519_tangled
+          chmod 600 ~/.ssh/id_ed25519_tangled
+          ssh-keyscan -T 10 tangled.org >> ~/.ssh/known_hosts
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_tangled -o IdentitiesOnly=yes" \
+            git push --force git@tangled.org:symmetricalboy.com/open-gaming HEAD:refs/heads/main --tags
