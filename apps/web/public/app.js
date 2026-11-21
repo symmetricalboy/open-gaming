@@ -250,11 +250,23 @@ async function openProofInspector(recordUri) {
   }
 }
 
-/* --- Tier Badge Helper --- */
+/* --- Tier & Timelock Badge Helpers --- */
 function renderTierBadge(tier) {
   if (!tier) return '';
-  const safe = String(tier).toLowerCase();
-  return `<span class="badge tier-${esc(safe)}">${esc(tier)}</span>`;
+  const safe = String(tier)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '');
+  return `<span class="badge ${safe ? `tier-${esc(safe)}` : ''}">${esc(tier)}</span>`;
+}
+
+function formatTimelockSummary(timelocked) {
+  if (!Array.isArray(timelocked) || timelocked.length === 0) return '';
+  const first = timelocked[0];
+  if (!first) return '';
+  const base = first.label
+    ? esc(first.label)
+    : `${formatTime(first.from)} &rarr; ${formatTime(first.until)}`;
+  return timelocked.length > 1 ? `${base} (+${timelocked.length - 1} more)` : base;
 }
 
 function renderMatchListHtml(matches) {
@@ -560,6 +572,8 @@ async function renderGameDetail(searchParams) {
         : unlocked
           ? a.revealedDescription
           : a.requirement || a.revealedDescription;
+      const displayTooltip = showMasked ? '' : a.revealedTooltip || a.tooltip || '';
+      const timelockText = formatTimelockSummary(a.timelocked);
       const iconSrc = showMasked ? '/assets/icons/locked.svg' : a.iconUrl || '/assets/icons/locked.svg';
 
       const progressBlock =
@@ -578,18 +592,20 @@ async function renderGameDetail(searchParams) {
       return `
         <li class="card ach-card ${unlocked || !viewer ? '' : 'locked'}">
           <div class="card-row">
-            <img src="${esc(iconSrc)}" alt="${esc(a.iconAlt)}" width="56" height="56" class="ach-icon" loading="lazy">
+            <img src="${esc(iconSrc)}" alt="${esc(showMasked ? '' : a.iconAlt)}" width="56" height="56" class="ach-icon" loading="lazy">
             <div class="flex-1">
               <div class="pill-row">
                 <h3>${esc(displayTitle)}</h3>
                 ${renderTierBadge(a.tier)}
-                ${a.countsTowardCompletion === false ? '<span class="badge">Bonus / Feat of Strength</span>' : ''}
+                ${a.completionOptional ? '<span class="badge">Completion Optional</span>' : ''}
+                ${timelockText ? `<span class="badge">Timelocked: ${timelockText}</span>` : ''}
                 ${a.repeatable ? '<span class="badge">Repeatable</span>' : ''}
                 ${a.retired ? '<span class="badge">Retired</span>' : ''}
                 ${a.hidden ? '<span class="badge">Hidden</span>' : ''}
                 ${a.isRedactedStub || a.hiddenSpace ? '<span class="badge badge-accent">Space-Gated Stub</span>' : ''}
               </div>
               <p class="muted-text">${esc(displayDesc)}</p>
+              ${displayTooltip ? `<p class="muted-text"><em>${esc(displayTooltip)}</em></p>` : ''}
               ${a.hiddenSpace ? `<div class="muted-text">Space: <code>${esc(a.hiddenSpace)}</code></div>` : ''}
             </div>
           </div>
@@ -1192,10 +1208,11 @@ async function renderPlayerGamercard(searchParams) {
                         <div class="pill-row">
                           <strong>${esc(b.title)}</strong>
                           ${renderTierBadge(b.tier)}
-                          ${b.countsTowardCompletion === false ? '<span class="badge">Bonus</span>' : ''}
+                          ${b.completionOptional ? '<span class="badge">Bonus</span>' : ''}
                           ${b.repeatable && Number(b.repeatCount) > 1 ? `<span class="badge badge-accent">&times;${Number(b.repeatCount)}</span>` : ''}
                         </div>
                         <p class="muted-text" style="margin-block-end: 0.35rem;">${esc(b.description)}</p>
+                        ${b.tooltip ? `<div class="muted-text" style="margin-block-end: 0.3rem;"><em>${esc(b.tooltip)}</em></div>` : ''}
                         ${contextSummary ? `<div class="muted-text" style="margin-block-end: 0.3rem;"><em>${esc(contextSummary)}</em></div>` : ''}
                         ${b.note ? `<div class="muted-text" style="margin-block-end: 0.3rem;">&ldquo;${esc(b.note)}&rdquo;</div>` : ''}
                         ${coOpStr ? `<div class="muted-text" style="margin-block-end: 0.3rem;">With: ${coOpStr}</div>` : ''}
@@ -1299,8 +1316,8 @@ async function renderPlayerGamercard(searchParams) {
           <div class="stat-label">Verified Unlocks</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">${Number(profile.tiers.platinum)} / ${Number(profile.tiers.gold)} / ${Number(profile.tiers.silver)} / ${Number(profile.tiers.bronze)}</div>
-          <div class="stat-label">Plat / Gold / Silver / Bronze</div>
+          <div class="stat-value">${Number(profile.tiers.platinum)} / ${Number(profile.tiers.gold)} / ${Number(profile.tiers.silver)} / ${Number(profile.tiers.bronze)}${Number(profile.tiers.custom || 0) > 0 ? ` (+${Number(profile.tiers.custom)})` : ''}</div>
+          <div class="stat-label">Plat / Gold / Silver / Bronze${Number(profile.tiers.custom || 0) > 0 ? ' (+Custom)' : ''}</div>
         </div>
       </div>
 
@@ -1477,9 +1494,9 @@ async function renderDevelopers() {
       <h2>Schema Design Highlights</h2>
       <ul class="cards-grid" role="list">
         <li class="card">
-          <h3>Spoiler-Proof Hidden Stubs, DLC &amp; Unlock Memories</h3>
+          <h3>Spoiler-Proof Hidden Stubs, Timelocks &amp; Unlock Memories</h3>
           <p class="muted-text">
-            <code>achievement.definition</code> supports redacted <code>hidden: true</code> stubs + <code>hiddenSpace</code>, non-penalizing DLC/jam badges (<code>countsTowardCompletion: false</code>), and <code>repeatable</code> accolades; <code>achievement.unlock</code> supports commemorative <code>media</code> blobs, <code>note</code>, and open-union <code>#unlockContext</code> (RPG Hall-of-Fame party/build snapshots).
+            <code>achievement.definition</code> supports redacted <code>hidden: true</code> stubs + <code>hiddenSpace</code>, non-penalizing seasonal/DLC/jam outliers (<code>completionOptional: true</code>), multi-range or recurring <code>timelocked</code> windows, hover <code>tooltip</code>s, and <code>repeatable</code> accolades; <code>achievement.unlock</code> supports commemorative <code>media</code> blobs, <code>note</code>, and open-union <code>#unlockContext</code> (RPG Hall-of-Fame party/build snapshots).
           </p>
         </li>
         <li class="card">

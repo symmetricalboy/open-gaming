@@ -104,9 +104,17 @@ export interface Translation {
   name?: string;
   description?: string;
   requirement?: string;
+  tooltip?: string;
 }
 
 export type TranslationMap = Record<string, Translation>;
+
+export interface TimeRange {
+  from: string;
+  until: string;
+  recurrence?: string;
+  label?: string;
+}
 
 export interface UnlockContext {
   $type: 'games.opengaming.defs#unlockContext';
@@ -256,6 +264,7 @@ export interface AchievementDefinitionRecord {
   title?: string;
   description?: string;
   requirement?: string;
+  tooltip?: string;
   translations?: TranslationMap;
   icon?: BlobRef;
   iconAlt?: string;
@@ -263,10 +272,9 @@ export interface AchievementDefinitionRecord {
   tier?: AchievementTier;
   hidden?: boolean;
   hiddenSpace?: string;
-  countsTowardCompletion?: boolean;
+  completionOptional?: boolean;
   repeatable?: boolean;
-  availableFrom?: string;
-  availableUntil?: string;
+  timelocked?: TimeRange[];
   retired?: boolean;
   stepsNeeded?: number;
   group?: string;
@@ -507,6 +515,7 @@ export interface TierCounts {
   gold: number;
   silver: number;
   bronze: number;
+  custom?: number;
   untiered: number;
 }
 

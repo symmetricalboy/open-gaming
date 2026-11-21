@@ -6,6 +6,7 @@ import {
   getScoreSortMetric,
   getTimeframeStartMs,
   isBetterScore,
+  isCompletionOptional,
   isVersionLegal,
   isWithinLeaderboardWindow,
   matchesDimensionFilter,
@@ -26,6 +27,7 @@ import {
   type ScoreComponentValMap,
   type ScoreFormat,
   type StringMap,
+  type TimeRange,
   type Timeframe,
 } from '@opengaming/sdk';
 import type { AppDatabase } from './db.js';
@@ -699,7 +701,7 @@ export class AppViewQueries {
         achievementTitle: String(r.ach_title),
         tier: r.ach_tier ? String(r.ach_tier) : undefined,
         iconUrl: r.ach_icon_url ? String(r.ach_icon_url) : undefined,
-        iconAlt: r.ach_icon_alt ? String(r.ach_icon_alt) : String(r.ach_title),
+        iconAlt: r.ach_icon_alt ? String(r.ach_icon_alt) : '',
         gameUri: r.resolved_game_uri ? String(r.resolved_game_uri) : undefined,
         gameName: r.game_name ? String(r.game_name) : 'Unknown Game',
         unlockedAt: String(r.unlocked_at),
@@ -960,19 +962,20 @@ export class AppViewQueries {
             : 'Keep playing to discover and unlock this hidden milestone.'
           : safeRevealedDesc,
         requirement: maskedForViewer ? undefined : record.requirement,
+        tooltip: maskedForViewer ? undefined : record.tooltip,
         revealedTitle: safeRevealedTitle,
         revealedDescription: safeRevealedDesc,
+        revealedTooltip: record.tooltip,
         iconUrl: r.icon_url ? String(r.icon_url) : undefined,
-        iconAlt: maskedForViewer ? 'Locked hidden achievement icon' : record.iconAlt ?? safeRevealedTitle,
+        iconAlt: maskedForViewer ? '' : record.iconAlt ?? '',
         tier: record.tier,
         hidden: isHidden,
         hiddenSpace: record.hiddenSpace,
         isRedactedStub,
         trustedIssuers: record.trustedIssuers,
-        countsTowardCompletion: record.countsTowardCompletion !== false,
+        completionOptional: isCompletionOptional(record),
         repeatable: Boolean(record.repeatable),
-        availableFrom: record.availableFrom,
-        availableUntil: record.availableUntil,
+        timelocked: record.timelocked,
         retired: Boolean(record.retired),
         masked: maskedForViewer,
         stepsNeeded: record.stepsNeeded,
@@ -1134,8 +1137,8 @@ export class AppViewQueries {
         .prepare(
           `SELECT u.uri, u.unlocked_at, u.attestation_cid, u.key_id,
                   u.participants_json, u.run_id, u.details_json, u.media_url, u.media_alt, u.note,
-                  d.uri AS def_uri, d.title, d.description, d.tier, d.icon_url, d.icon_alt,
-                  d.counts_toward_completion, d.repeatable
+                  d.uri AS def_uri, d.title, d.description, d.tooltip, d.tier, d.icon_url, d.icon_alt,
+                  d.completion_optional, d.counts_toward_completion, d.repeatable, d.timelocked_json
            FROM achievement_unlocks u
            JOIN achievement_definitions d ON d.uri = u.achievement_uri
            WHERE u.player_did = ? AND d.game_uri = ? AND u.verified = 1 AND u.revoked = 0
@@ -1169,17 +1172,25 @@ export class AppViewQueries {
             return { ...p, handle: pMeta.handle, displayName: pMeta.displayName ?? pMeta.handle ?? p.name ?? p.did };
           });
 
+          const isOptional =
+            Number(r.completion_optional ?? 0) === 1 || Number(r.counts_toward_completion ?? 1) === 0;
+          const timelocked: TimeRange[] | undefined = r.timelocked_json
+            ? JSON.parse(String(r.timelocked_json))
+            : undefined;
+
           return {
             unlockUri: String(r.uri),
             achievementUri: id,
             title: String(r.title),
             description: String(r.description),
+            tooltip: r.tooltip ? String(r.tooltip) : undefined,
             tier: r.tier ? String(r.tier) : undefined,
-            countsTowardCompletion: Number(r.counts_toward_completion ?? 1) !== 0,
+            completionOptional: isOptional,
             repeatable: Number(r.repeatable ?? 0) === 1,
             repeatCount: Number(r.repeatable ?? 0) === 1 ? repeatCountByDef.get(id) ?? 1 : undefined,
+            timelocked,
             iconUrl: r.icon_url ? String(r.icon_url) : undefined,
-            iconAlt: r.icon_alt ? String(r.icon_alt) : String(r.title),
+            iconAlt: r.icon_alt ? String(r.icon_alt) : '',
             unlockedAt: String(r.unlocked_at),
             attestationCid: r.attestation_cid ? String(r.attestation_cid) : undefined,
             runId: r.run_id ? String(r.run_id) : undefined,

@@ -78,6 +78,7 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       requirement TEXT,
+      tooltip TEXT,
       icon_url TEXT,
       icon_cid TEXT,
       icon_mime TEXT,
@@ -89,8 +90,10 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
       hidden_space TEXT,
       is_redacted_stub INTEGER NOT NULL DEFAULT 0,
       trusted_issuers_json TEXT,
+      completion_optional INTEGER NOT NULL DEFAULT 0,
       counts_toward_completion INTEGER NOT NULL DEFAULT 1,
       repeatable INTEGER NOT NULL DEFAULT 0,
+      timelocked_json TEXT,
       available_from TEXT,
       available_until TEXT,
       retired INTEGER NOT NULL DEFAULT 0,
@@ -340,11 +343,14 @@ export function createDatabase(dbPath = ':memory:'): AppDatabase {
   `);
 
   // Idempotent schema migrations for pre-existing persistent SQLite databases
+  ensureColumn(db, 'achievement_definitions', 'tooltip', 'TEXT');
   ensureColumn(db, 'achievement_definitions', 'hidden_space', 'TEXT');
   ensureColumn(db, 'achievement_definitions', 'is_redacted_stub', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'achievement_definitions', 'trusted_issuers_json', 'TEXT');
+  ensureColumn(db, 'achievement_definitions', 'completion_optional', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'achievement_definitions', 'counts_toward_completion', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'achievement_definitions', 'repeatable', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'achievement_definitions', 'timelocked_json', 'TEXT');
   ensureColumn(db, 'achievement_definitions', 'available_from', 'TEXT');
   ensureColumn(db, 'achievement_definitions', 'available_until', 'TEXT');
   ensureColumn(db, 'achievement_definitions', 'retired', 'INTEGER NOT NULL DEFAULT 0');

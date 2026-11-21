@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). Supports spoiler-safe secrets (`hidden` + `hiddenSpace`), non-penalizing event/DLC/jam Feats of Strength (`countsTowardCompletion: false`), recurring commendations (`repeatable`), multi-locale `translations`, and post-EoS `trustedIssuers`.",
+      "description": "Defines one achievement offered by a game. Publish in the game publisher's repository using a stable, human-readable slug rkey (e.g. `first-flight`, `score-50`). Supports spoiler-safe secrets (`hidden` + `hiddenSpace`), non-penalizing seasonal/DLC/jam outliers (`completionOptional: true`), multi-range or recurring availability schedules (`timelocked`), achievement hover `tooltip`s, recurring commendations (`repeatable`), multi-locale `translations`, and multi-signer `trustedIssuers`.",
       "key": "any",
       "record": {
         "type": "object",
@@ -34,10 +34,16 @@
             "maxLength": 1000,
             "description": "Optional imperative prompt shown BEFORE the player unlocks the achievement (e.g. `Clear 50 posts in a single run`), when `description` is written in the past tense (`You cleared 50 posts!`)."
           },
+          "tooltip": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "maxLength": 1000,
+            "description": "Optional hover/focus tooltip or flavour text for the achievement itself (e.g. compact badge-shelf hover blurb or witty flavour quote). Masked by clients while `hidden: true` and locked."
+          },
           "translations": {
             "type": "ref",
             "ref": "games.opengaming.defs#translationMap",
-            "description": "Optional localized `title`, `description`, and `requirement` strings keyed by BCP-47 language tag (e.g. `ja`, `ko`, `es`)."
+            "description": "Optional localized `title`, `description`, `requirement`, and `tooltip` strings keyed by BCP-47 language tag (e.g. `ja`, `ko`, `es`)."
           },
           "icon": {
             "type": "blob",
@@ -49,7 +55,7 @@
             "type": "string",
             "maxGraphemes": 300,
             "maxLength": 1000,
-            "description": "Accessibility alt text for the achievement icon."
+            "description": "Optional screen-reader description of the icon artwork itself. Omit when the icon is purely decorative alongside `title`/`description`; use `tooltip` for achievement hover/flavour text."
           },
           "lockedIcon": {
             "type": "blob",
@@ -61,12 +67,12 @@
             "type": "string",
             "maxLength": 32,
             "knownValues": ["bronze", "silver", "gold", "platinum"],
-            "description": "Optional trophy plaque tier indicating author-intended difficulty/prestige."
+            "description": "Optional author-defined tier or rarity label. Uses open `knownValues`, so games may omit `tier` entirely or define custom game-specific tiers (e.g. `common`, `uncommon`, `rare`, `legendary`)."
           },
           "hidden": {
             "type": "boolean",
             "default": false,
-            "description": "If true, clients MUST mask the achievement's title, description, and icon until the viewing player has unlocked it. To prevent firehose/`pds.ls` spoiler leaks, publishers MAY omit plaintext `title`/`description`/`icon` on the public PDS record and point `hiddenSpace` to an access-controlled ATProto Space that auto-adds players upon unlock."
+            "description": "If true, clients MUST mask the achievement's `title`, `description`, `requirement`, `tooltip`, and `icon` until the viewing player has unlocked it. To prevent firehose/`pds.ls` spoiler leaks, publishers MAY omit plaintext metadata on the public PDS record and point `hiddenSpace` to an access-controlled ATProto Space that auto-adds players upon unlock."
           },
           "hiddenSpace": {
             "type": "string",
@@ -74,25 +80,25 @@
             "maxLength": 512,
             "description": "Optional URI of an access-controlled ATProto Space (or reveal endpoint) holding the unredacted `achievement.definition` metadata for players who have unlocked this hidden achievement."
           },
-          "countsTowardCompletion": {
+          "completionOptional": {
             "type": "boolean",
-            "default": true,
-            "description": "When `false`, marks this achievement as a bonus 'Feat of Strength', time-limited Game Jam badge, DLC add-on, or mutually exclusive flavour route that celebrates earners (`bonusUnlockedCount`) without penalizing newcomers' `100%` base-game completion."
+            "default": false,
+            "description": "When `true`, marks this achievement as optional for `100%` base-game completion (e.g. seasonal events, time-limited Game Jam badges, post-launch DLC packs, or mutually exclusive flavour routes). Omit (defaults to `false`) for standard achievements required for the game-completed checkmark; earners of optional achievements are still celebrated via `bonusUnlockedCount`."
           },
           "repeatable": {
             "type": "boolean",
             "default": false,
             "description": "When `true`, players may earn this achievement multiple times across distinct `achievement.unlock` records (e.g. winning recurring weekly events)."
           },
-          "availableFrom": {
-            "type": "string",
-            "format": "datetime",
-            "description": "Optional timestamp when a seasonal, promotional, or Game Jam achievement becomes earnable."
-          },
-          "availableUntil": {
-            "type": "string",
-            "format": "datetime",
-            "description": "Optional timestamp after which a seasonal or Game Jam achievement is no longer earnable."
+          "timelocked": {
+            "type": "array",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Optional list of active time ranges during which this achievement is earnable—supporting single events, multi-window reruns, or recurring schedules (e.g. every Friday night in July). Each entry requires both `from` and `until` together so neither bound is accidentally omitted.",
+            "items": {
+              "type": "ref",
+              "ref": "games.opengaming.defs#timeRange"
+            }
           },
           "retired": {
             "type": "boolean",

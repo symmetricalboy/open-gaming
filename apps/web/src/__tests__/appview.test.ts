@@ -745,7 +745,7 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
       },
     });
 
-    // Core achievement + non-penalizing Jam Feat of Strength (`countsTowardCompletion: false`)
+    // Core achievement (undeclared completionOptional -> required) + non-penalizing Jam outlier (`completionOptional: true` + `timelocked` + `tooltip`)
     await app.indexer.indexRecord({
       uri: coreAchUri,
       record: {
@@ -753,9 +753,9 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
         game: gameUri,
         title: 'Clear Act I',
         description: 'Defeat the Sentinel of Dawn.',
+        tooltip: 'Dawn breaks over the Aether Spire.',
         icon: blobStub,
         tier: 'gold',
-        countsTowardCompletion: true,
         createdAt: '2026-11-08T00:00:00.000Z',
       },
     });
@@ -767,9 +767,17 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
         game: gameUri,
         title: 'ATProto Game Jam 2026 Founder',
         description: 'Played during the November 2026 ATProto Game Jam.',
+        tooltip: 'Founding challenger badge.',
         icon: blobStub,
-        tier: 'platinum',
-        countsTowardCompletion: false,
+        tier: 'rare',
+        completionOptional: true,
+        timelocked: [
+          {
+            from: '2026-11-01T00:00:00.000Z',
+            until: '2026-11-23T00:00:00.000Z',
+            label: 'ATProto Game Jam 2026',
+          },
+        ],
         createdAt: '2026-11-08T00:00:00.000Z',
       },
     });
@@ -834,6 +842,7 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
     assert.equal(aliceProf.games[0].unlockedCount, 1);
     assert.equal(aliceProf.games[0].bonusUnlockedCount, 1);
     assert.equal(aliceProf.games[0].completed, true);
+    assert.equal(aliceProf.tiers.custom, 1);
 
     const bobProfRes = await fetch(`${baseUrl}/xrpc/games.opengaming.actor.getProfile?actor=bob.v2.test`);
     const bobProf = (await bobProfRes.json()) as Record<string, any>;
@@ -1081,12 +1090,19 @@ describe('opengaming.games AppView (Zero Dummy Data, XRPC, Jetstream & Revocatio
     assert.equal(v2GameHub.challenges[0].seed, '2026-11-08');
     assert.equal(v2GameHub.recentMatches.length, 1);
     assert.equal(v2GameHub.recentMatches[0].verificationMethod, 'multi-participant');
+    const hubJamAch = v2GameHub.achievements.find((a: any) => a.uri === jamFeatUri);
+    assert.equal(hubJamAch.completionOptional, true);
+    assert.equal(hubJamAch.timelocked.length, 1);
+    assert.equal(hubJamAch.tooltip, 'Founding challenger badge.');
+    assert.equal(hubJamAch.iconAlt, '');
 
     const v2AliceCardRes = await fetch(`${baseUrl}/api/actor?actor=alice.v2.test`);
     const v2AliceCard = (await v2AliceCardRes.json()) as Record<string, any>;
     assert.equal(v2AliceCard.recentMatches.length, 1);
     const coreBadge = v2AliceCard.games[0].unlockedBadges.find((b: any) => b.achievementUri === coreAchUri);
     assert.equal(coreBadge.note, 'What a clutch heal from Bob!');
+    assert.equal(coreBadge.tooltip, 'Dawn breaks over the Aether Spire.');
+    assert.equal(coreBadge.completionOptional, false);
     assert.equal(coreBadge.details.attributes.character, 'Aegis Paladin');
     assert.equal(coreBadge.participants.length, 2);
   });

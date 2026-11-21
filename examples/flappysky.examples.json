@@ -44,16 +44,19 @@
         "title": "First Flight",
         "description": "Cleared your very first post in Flappysky.",
         "requirement": "Clear 1 post in a single run.",
+        "tooltip": "Every journey across the Atmosphere starts with a single flap.",
         "translations": {
           "ja": {
             "title": "初フライト",
             "description": "Flappyskyで最初のポストを飛び越えた。",
-            "requirement": "1回のランでポストを1つクリアする。"
+            "requirement": "1回のランでポストを1つクリアする。",
+            "tooltip": "Atmosphereを巡る旅も、最初のひと羽ばたきから。"
           },
           "es": {
             "title": "Primer Vuelo",
             "description": "Superaste tu primera publicación en Flappysky.",
-            "requirement": "Supera 1 publicación en una sola partida."
+            "requirement": "Supera 1 publicación en una sola partida.",
+            "tooltip": "Todo viaje por la Atmosphere comienza con un solo aleteo."
           }
         },
         "icon": {
@@ -65,7 +68,6 @@
         "iconAlt": "A bright blue butterfly soaring over a rounded post.",
         "tier": "bronze",
         "hidden": false,
-        "countsTowardCompletion": true,
         "listOrder": 10,
         "createdAt": "2026-11-07T20:00:00.000Z"
       }
@@ -135,6 +137,7 @@
         "title": "ATProto Game Jam 2026 Pioneer",
         "description": "Played Flappysky during the 2026 ATProto Game Jam window.",
         "requirement": "Complete a run before November 22, 2026.",
+        "tooltip": "You were there when the jam took flight!",
         "icon": {
           "$type": "blob",
           "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
@@ -142,12 +145,47 @@
           "size": 48210
         },
         "tier": "gold",
-        "countsTowardCompletion": false,
-        "availableFrom": "2026-11-01T00:00:00.000Z",
-        "availableUntil": "2026-11-23T00:00:00.000Z",
+        "completionOptional": true,
+        "timelocked": [
+          {
+            "from": "2026-11-01T00:00:00.000Z",
+            "until": "2026-11-23T00:00:00.000Z",
+            "label": "ATProto Game Jam 2026"
+          }
+        ],
         "group": "Seasonal & Jam Feats",
         "listOrder": 200,
         "createdAt": "2026-11-08T06:00:00.000Z"
+      }
+    },
+    {
+      "uri": "at://did:plc:flappyskygameexample/games.opengaming.achievement.definition/july-friday-nights",
+      "value": {
+        "$type": "games.opengaming.achievement.definition",
+        "game": "at://did:plc:flappyskygameexample/games.atmosphere.define/flappysky",
+        "title": "Midsummer Night's Flight",
+        "description": "Soared through Flappysky on a Friday night in July.",
+        "requirement": "Complete a run on any Friday night in July (20:00–04:00 UTC).",
+        "tooltip": "Warm summer thermals carry you further after dusk.",
+        "icon": {
+          "$type": "blob",
+          "ref": { "$link": "bafkreihbrikl5p3a3tmsgmt5ymprlxmbgo2vrw3xf3iokwoyhlfkj2jori" },
+          "mimeType": "image/png",
+          "size": 48210
+        },
+        "tier": "rare",
+        "completionOptional": true,
+        "timelocked": [
+          {
+            "from": "2026-07-03T20:00:00.000Z",
+            "until": "2026-07-04T04:00:00.000Z",
+            "recurrence": "FREQ=WEEKLY;BYMONTH=7;BYDAY=FR",
+            "label": "Every Friday night in July"
+          }
+        ],
+        "group": "Seasonal & Jam Feats",
+        "listOrder": 210,
+        "createdAt": "2026-11-08T06:30:00.000Z"
       }
     }
   ],

@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "games.opengaming.defs",
-  "description": "Shared type definitions for Open Gaming inline attestations, single-metric score formatting, co-op participants, multi-locale translations, dimension maps, and genre breakdowns.",
+  "description": "Shared type definitions for Open Gaming inline attestations, single-metric score formatting, bounded/recurring timelock ranges, co-op participants, multi-locale translations, dimension maps, and genre breakdowns.",
   "defs": {
     "inlineSignature": {
       "type": "object",
@@ -183,6 +183,40 @@
           "maxGraphemes": 300,
           "maxLength": 1000,
           "description": "Localized pre-unlock requirement prompt."
+        },
+        "tooltip": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "maxLength": 1000,
+          "description": "Localized achievement hover/focus tooltip or flavour text."
+        }
+      }
+    },
+    "timeRange": {
+      "type": "object",
+      "description": "A bounded availability window (`[from, until]`) used in `achievement.definition#timelocked`. Requires both `from` and `until` together in a single object so neither endpoint can be accidentally omitted, and optionally repeats via `recurrence`.",
+      "required": ["from", "until"],
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Inclusive timestamp when this availability window opens (or first occurrence start when `recurrence` is set)."
+        },
+        "until": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Inclusive timestamp when this availability window closes (must be strictly after `from`; defines the window duration `until - from` when `recurrence` is set)."
+        },
+        "recurrence": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Optional RFC 5545 `RRULE` repeating the `(until - from)` window duration across future dates (e.g. `FREQ=WEEKLY;BYMONTH=7;BYDAY=FR` for every Friday night in July)."
+        },
+        "label": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "maxLength": 200,
+          "description": "Optional human-readable schedule summary for UI display (e.g. `Every Friday night in July`, `ATProto Game Jam 2026`)."
         }
       }
     },

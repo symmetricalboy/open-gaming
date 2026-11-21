@@ -14,7 +14,7 @@ Open Gaming intentionally **omits XP / gamerscore point values** and **places no
 
 - **Zero Clout-Chasing or Shovelware Inflation**: Without cross-game XP totals, games have no incentive to pad out trivial point-farming achievements, and AppViews need no arbitrary clamping formulas.
 - **Freedom of Game Design**: Minimalist jam games with 3 handcrafted achievements and sprawling RPGs with 500+ milestones are both first-class citizens.
-- **Rich Per-Game Signals**: Appreciation comes from custom artwork (`icon`), author-chosen trophy tiers (`bronze | silver | gold | platinum`), per-game completion progress (`unlockedCount / totalAchievements`, `bonusUnlockedCount`, and `100%` Perfect Game showcases), and global unlock rarity (`unlockedPlayers / totalPlayers` computed by AppViews).
+- **Rich Per-Game Signals**: Appreciation comes from custom artwork (`icon` + `lockedIcon`), optional open-ended tiers (`bronze | silver | gold | platinum` or game-specific scales like `common | uncommon | rare`, counted in `tiers.custom`), hover flavour text (`tooltip`), per-game completion progress (`unlockedCount / totalAchievements`, `bonusUnlockedCount`, and `100%` Perfect Game showcases), and global unlock rarity (`unlockedPlayers / totalPlayers` computed by AppViews).
 
 ---
 
@@ -33,19 +33,21 @@ Published in the game publisher's own PDS (`key: "any"`, using a stable slug `rk
 ### Spoiler-Proof Hidden Achievements & ATProto Spaces (`hidden: true` + `hiddenSpace`)
 Because public PDS repositories and Firehose/Jetstream streams can be inspected directly (e.g. on `pds.ls`), Open Gaming supports **two tiers of hidden achievements**:
 
-1. **Casual UI Masking (`hidden: true` with `title`/`description`)**: Compliant AppViews mask `title`, `description`, `requirement`, and `icon` until unlocked by the viewing player.
+1. **Casual UI Masking (`hidden: true` with `title`/`description`)**: Compliant AppViews mask `title`, `description`, `requirement`, `tooltip`, and `icon` until unlocked by the viewing player.
 2. **Cryptographically Spoiler-Proof Stubs (`hidden: true` omitting `title`, `description`, and `icon` + `hiddenSpace`)**:
    - The public PDS record contains **only** `game`, `hidden: true`, optional `lockedIcon`, `tier`, `listOrder`, `hiddenSpace`, and `createdAt` — leaking zero narrative spoilers prior to or after launch.
    - `hiddenSpace` (`uri`) points to an access-controlled **ATProto Space** (or authenticated reveal endpoint) holding the real title, description, and artwork.
 
-### Non-Penalizing DLC, Seasonal & Game Jam Badges (`countsTowardCompletion`, `repeatable`, Availability Windows)
-- `countsTowardCompletion` (`boolean`, default `true`): When `false`, marks the achievement as a **Bonus / DLC / Feat of Strength** milestone. It is excluded from base-game `totalAchievements` and `100%` `completed` calculations so post-launch DLC or time-limited Game Jam badges never revoke existing players' `100%` status, while still surfacing in `actor.getProfile` under `bonusUnlockedCount` and `totalUnlocks`.
-- `repeatable` (`boolean`, default `false`): Allows a player to earn an accolade multiple times (e.g. seasonal mastery, Prestige resets, multi-class clears) using timestamped/TID `rkey`s (`getUnlockRecordPlan`).
-- `availableFrom` / `availableUntil` (`datetime`) & `retired` (`boolean`): Communicates time-limited or sunsetted achievements cleanly.
-- `translations` (`games.opengaming.defs#translationMap`): Optional BCP-47 locale map (`ja`, `es`, `pt-BR`) overriding `title`, `description`, and `requirement` (`resolveTranslation` in `@opengaming/sdk`).
+### Optional Completion Outliers, Multi-Range Timelocks & Tooltips (`completionOptional`, `timelocked`, `tooltip`)
+- `completionOptional` (`boolean`, default `false`): Because almost all achievements count toward `100%` completion, the undeclared/falsy state defaults to **required for completion** with zero extra fields. Setting `completionOptional: true` on rare outliers (seasonal events, time-limited Game Jam badges, post-launch DLC packs, or mutually exclusive flavour routes) excludes them from base-game `totalAchievements` and `100%` `completed` checks while still celebrating earners via `bonusUnlockedCount` and `totalUnlocks`.
+- `timelocked` (`games.opengaming.defs#timeRange[]`): Replaces separate `availableFrom` / `availableUntil` fields with an array of `{ from, until, recurrence?, label? }` windows where **both `from` and `until` are required together** (preventing half-declared ranges) and supporting multiple discrete windows or RFC 5545 `RRULE` schedules (e.g. `FREQ=WEEKLY;BYMONTH=7;BYDAY=FR` for *every Friday night in July*, evaluated via `isWithinTimelock` in `@opengaming/sdk`).
+- `tooltip` (`string`, <= 300 graphemes) vs `iconAlt` (`string`): `tooltip` provides hover/focus text or witty flavour commentary for the achievement itself (e.g. compact badge shelves), whereas `iconAlt` is strictly optional screen-reader artwork description (treated as decorative `alt=""` when omitted next to `title`).
+- `repeatable` (`boolean`, default `false`): Allows a player to earn an accolade multiple times (e.g. seasonal mastery, Prestige resets, multi-class clears) using unique `rkey`s (`getUnlockRkey`).
+- `retired` (`boolean`, default `false`): Communicates permanently sunsetted legacy achievements cleanly.
+- `translations` (`games.opengaming.defs#translationMap`): Optional BCP-47 locale map (`ja`, `es`, `pt-BR`) overriding `title`, `description`, `requirement`, and `tooltip` (`resolveTranslation` in `@opengaming/sdk`).
 
 ### Additional Optional Fields
-- `requirement` (`string`), `iconAlt` (`string`), `lockedIcon` (`blob`), `tier` (`"bronze" | "silver" | "gold" | "platinum"`), `trustedIssuers` (`did[]`), `stepsNeeded` (`integer`, `>= 2`), `group` (`string`), `listOrder` (`integer`), `badge` (`at-uri`), `updatedAt` (`datetime`).
+- `requirement` (`string`), `lockedIcon` (`blob`), `tier` (open `knownValues`: `"bronze" | "silver" | "gold" | "platinum"` or custom game tiers like `"common" | "uncommon" | "rare"`), `trustedIssuers` (`did[]`), `stepsNeeded` (`integer`, `>= 2`), `group` (`string`), `listOrder` (`integer`), `badge` (`at-uri`), `updatedAt` (`datetime`).
 
 ---
 

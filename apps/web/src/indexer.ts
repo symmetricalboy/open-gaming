@@ -2,12 +2,14 @@ import {
   NSIDS,
   getRecordLabelValues,
   getScoreSortMetric,
+  isCompletionOptional,
   isWithinLeaderboardWindow,
   resolveActiveLabels,
   validateComponentDefs,
   validateDimensionDefs,
   validateScoreComponents,
   validateScoreDimensions,
+  validateTimelockRanges,
   verifyMatchResult,
   verifyRecordAttestation,
   type AchievementDefinitionRecord,
@@ -323,6 +325,10 @@ export class OpenGamingIndexer {
         if (!def.hidden && (!def.title || !def.description)) {
           return { indexed: false, collection, error: 'Visible achievement.definition requires title and description' };
         }
+        const tlErr = validateTimelockRanges(def.timelocked);
+        if (tlErr) {
+          return { indexed: false, collection, error: tlErr };
+        }
 
         const isRedactedStub = Boolean(def.hidden && (!def.title || !def.description));
         const storedTitle = def.title ?? 'Hidden Achievement';
@@ -337,23 +343,25 @@ export class OpenGamingIndexer {
         const iconUrl =
           iconUrlOverride ??
           makeBlobProxyUrl(did, iconBlob.cid ?? lockedBlob.cid);
+        const optionalFlag = isCompletionOptional(def) ? 1 : 0;
 
         this.db
           .prepare(
             `INSERT INTO achievement_definitions (
-               uri, publisher_did, rkey, cid, game_uri, title, description, requirement,
+               uri, publisher_did, rkey, cid, game_uri, title, description, requirement, tooltip,
                icon_url, icon_cid, icon_mime, icon_alt, locked_icon_cid, locked_icon_mime,
                tier, hidden, hidden_space, is_redacted_stub, trusted_issuers_json,
-               counts_toward_completion, repeatable, available_from, available_until,
+               completion_optional, counts_toward_completion, repeatable, timelocked_json,
                retired, translations_json, steps_needed, group_name, list_order, badge_uri,
                created_at, raw_json, is_demo
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(uri) DO UPDATE SET
                cid = excluded.cid,
                game_uri = excluded.game_uri,
                title = excluded.title,
                description = excluded.description,
                requirement = excluded.requirement,
+               tooltip = excluded.tooltip,
                icon_url = COALESCE(excluded.icon_url, achievement_definitions.icon_url),
                icon_cid = excluded.icon_cid,
                icon_mime = excluded.icon_mime,
@@ -365,10 +373,10 @@ export class OpenGamingIndexer {
                hidden_space = excluded.hidden_space,
                is_redacted_stub = excluded.is_redacted_stub,
                trusted_issuers_json = excluded.trusted_issuers_json,
+               completion_optional = excluded.completion_optional,
                counts_toward_completion = excluded.counts_toward_completion,
                repeatable = excluded.repeatable,
-               available_from = excluded.available_from,
-               available_until = excluded.available_until,
+               timelocked_json = excluded.timelocked_json,
                retired = excluded.retired,
                translations_json = excluded.translations_json,
                steps_needed = excluded.steps_needed,
@@ -386,6 +394,7 @@ export class OpenGamingIndexer {
             storedTitle,
             storedDesc,
             def.requirement ?? null,
+            def.tooltip ?? null,
             iconUrl,
             iconBlob.cid ?? null,
             iconBlob.mimeType ?? null,
@@ -397,10 +406,10 @@ export class OpenGamingIndexer {
             def.hiddenSpace ?? null,
             isRedactedStub ? 1 : 0,
             def.trustedIssuers ? JSON.stringify(def.trustedIssuers) : null,
-            def.countsTowardCompletion === false ? 0 : 1,
+            optionalFlag,
+            optionalFlag ? 0 : 1,
             def.repeatable ? 1 : 0,
-            def.availableFrom ?? null,
-            def.availableUntil ?? null,
+            def.timelocked ? JSON.stringify(def.timelocked) : null,
             def.retired ? 1 : 0,
             def.translations ? JSON.stringify(def.translations) : null,
             typeof def.stepsNeeded === 'number' ? Math.trunc(def.stepsNeeded) : null,

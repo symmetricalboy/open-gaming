@@ -23,6 +23,8 @@ import {
   getOrderedJudgmentIds,
   getOverwriteBestScoreRkey,
   getScoreSortMetric,
+  isCompletionOptional,
+  isWithinTimelock,
   loadSigningKey,
   parseDimensionsFilter,
   resolveActiveLabels,
@@ -33,6 +35,7 @@ import {
   validateDimensionDefs,
   validateScoreComponents,
   validateScoreDimensions,
+  validateTimelockRanges,
   verifyMatchResult,
   verifyRecordAttestation,
   type AchievementDefinitionRecord,
@@ -1018,22 +1021,28 @@ describe('v0.2 Roadmap: personalBests, Dimensions, Bonus Achievements, Rich Unlo
     assert.equal(golfDec.recommendedRkey, getOverwriteBestScoreRkey(LB_HIGH_SCORE));
   });
 
-  it('tracks countsTowardCompletion: false as bonusUnlockedCount, supports repeatable unlocks, rich unlock memories, and BCP-47 translations', async () => {
+  it('tracks completionOptional: true as bonusUnlockedCount, validates multi-range & recurring timelocked schedules, supports custom tiers & tooltips, and BCP-47 translations', async () => {
     const lex = createOpenGamingLexicons();
     const gameKeys = await generateSigningKeys();
 
     const baseAchUri = `at://${GAME_DID}/${NSIDS.AchievementDefinition}/story-clear`;
     const jamBadgeUri = `at://${GAME_DID}/${NSIDS.AchievementDefinition}/jam-2026-founder`;
+    const fridayNightUri = `at://${GAME_DID}/${NSIDS.AchievementDefinition}/july-friday-nights`;
 
+    // Undeclared completionOptional defaults cleanly to false (required for 100% completion)
     const baseAch: AchievementDefinitionRecord = {
       $type: NSIDS.AchievementDefinition,
       game: GAME_URI,
       title: 'Sky Champion',
       description: 'Cleared the main campaign.',
+      tooltip: 'Nothing stands between you and the horizon.',
       icon: DUMMY_ICON,
-      countsTowardCompletion: true,
       translations: {
-        ja: { title: 'スカイチャンピオン', description: 'メインキャンペーンをクリアした。' },
+        ja: {
+          title: 'スカイチャンピオン',
+          description: 'メインキャンペーンをクリアした。',
+          tooltip: '地平線の彼方まで遮るものはない。',
+        },
       },
       createdAt: '2026-11-08T00:00:00.000Z',
     };
@@ -1043,16 +1052,77 @@ describe('v0.2 Roadmap: personalBests, Dimensions, Bonus Achievements, Rich Unlo
       game: GAME_URI,
       title: 'ATProto Game Jam 2026 Participant',
       description: 'Played during the November 2026 ATProto Game Jam.',
+      tooltip: 'Early adopter wings.',
       icon: DUMMY_ICON,
-      countsTowardCompletion: false,
+      tier: 'gold',
+      completionOptional: true,
       repeatable: false,
-      availableFrom: '2026-11-01T00:00:00.000Z',
-      availableUntil: '2026-11-22T23:59:59.999Z',
+      timelocked: [
+        {
+          from: '2026-11-01T00:00:00.000Z',
+          until: '2026-11-22T23:59:59.999Z',
+          label: 'ATProto Game Jam 2026',
+        },
+      ],
       createdAt: '2026-11-08T00:00:00.000Z',
     };
 
+    const fridayNightAch: AchievementDefinitionRecord = {
+      $type: NSIDS.AchievementDefinition,
+      game: GAME_URI,
+      title: "Midsummer Night's Flight",
+      description: 'Played on a Friday night in July.',
+      tooltip: 'Every Friday night in July!',
+      icon: DUMMY_ICON,
+      tier: 'rare', // Custom game-specific tier!
+      completionOptional: true,
+      timelocked: [
+        {
+          from: '2026-07-03T20:00:00.000Z',
+          until: '2026-07-04T04:00:00.000Z',
+          recurrence: 'FREQ=WEEKLY;BYMONTH=7;BYDAY=FR',
+          label: 'Every Friday night in July',
+        },
+      ],
+      createdAt: '2026-11-08T00:00:00.000Z',
+    };
+
+    lex.assertValidRecord(NSIDS.AchievementDefinition, jsonToLex(baseAch));
+    lex.assertValidRecord(NSIDS.AchievementDefinition, jsonToLex(jamBadge));
+    lex.assertValidRecord(NSIDS.AchievementDefinition, jsonToLex(fridayNightAch));
+
+    assert.equal(isCompletionOptional(baseAch), false);
+    assert.equal(isCompletionOptional(jamBadge), true);
+
+    // Omitting half of a timelocked range (`until` missing) MUST fail Lexicon validation!
+    assert.throws(() => {
+      lex.assertValidRecord(
+        NSIDS.AchievementDefinition,
+        jsonToLex({
+          ...jamBadge,
+          timelocked: [{ from: '2026-11-01T00:00:00.000Z' }],
+        })
+      );
+    });
+
+    // Inverted range (`until <= from`) fails validateTimelockRanges
+    assert.notEqual(
+      validateTimelockRanges([{ from: '2026-11-22T00:00:00.000Z', until: '2026-11-01T00:00:00.000Z' }]),
+      null
+    );
+    assert.equal(validateTimelockRanges(fridayNightAch.timelocked), null);
+
+    // Evaluate recurring "every Friday night in July" (including overnight Saturday 02:15Z & following year!)
+    assert.equal(isWithinTimelock('2026-07-10T22:30:00.000Z', fridayNightAch.timelocked), true);
+    assert.equal(isWithinTimelock('2026-07-11T02:15:00.000Z', fridayNightAch.timelocked), true);
+    assert.equal(isWithinTimelock('2027-07-16T21:00:00.000Z', fridayNightAch.timelocked), true);
+    assert.equal(isWithinTimelock('2026-08-07T22:00:00.000Z', fridayNightAch.timelocked), false);
+    assert.equal(isWithinTimelock('2026-07-09T22:00:00.000Z', fridayNightAch.timelocked), false);
+
     assert.equal(resolveTranslation(baseAch, 'ja-JP').title, 'スカイチャンピオン');
+    assert.equal(resolveTranslation(baseAch, 'ja-JP').tooltip, '地平線の彼方まで遮るものはない。');
     assert.equal(resolveTranslation(baseAch, 'fr-FR').title, 'Sky Champion');
+    assert.equal(resolveTranslation(baseAch, 'fr-FR').tooltip, 'Nothing stands between you and the horizon.');
 
     const baseUnlockStub = {
       $type: NSIDS.AchievementUnlock,
@@ -1064,14 +1134,22 @@ describe('v0.2 Roadmap: personalBests, Dimensions, Bonus Achievements, Rich Unlo
       achievement: jamBadgeUri,
       unlockedAt: '2026-11-08T11:00:00.000Z',
     };
+    const fridayUnlockStub = {
+      $type: NSIDS.AchievementUnlock,
+      achievement: fridayNightUri,
+      unlockedAt: '2026-07-10T22:30:00.000Z',
+    };
 
-    // Player who unlocks ONLY the base achievement (without the time-limited jam badge) STILL achieves 100% completion!
+    const allDefs = [
+      { uri: baseAchUri, record: baseAch },
+      { uri: jamBadgeUri, record: jamBadge },
+      { uri: fridayNightUri, record: fridayNightAch },
+    ];
+
+    // Player who unlocks ONLY the base achievement (without optional seasonal/jam badges) STILL achieves 100% completion!
     const completionBaseOnly = calculateGameCompletion({
       game: GAME_URI,
-      definitions: [
-        { uri: baseAchUri, record: baseAch },
-        { uri: jamBadgeUri, record: jamBadge },
-      ],
+      definitions: allDefs,
       verifiedUnlocks: [baseUnlockStub],
     });
     assert.equal(completionBaseOnly.totalAchievements, 1);
@@ -1080,17 +1158,23 @@ describe('v0.2 Roadmap: personalBests, Dimensions, Bonus Achievements, Rich Unlo
     assert.equal(completionBaseOnly.completionPercent, 100);
     assert.equal(completionBaseOnly.completed, true);
 
-    // Player who ALSO has the jam badge gets bonusUnlockedCount = 1 while keeping 100% base completion
+    // Player who ALSO unlocks both optional badges gets bonusUnlockedCount = 2 and custom tier counted in tiers.custom!
     const completionWithBonus = calculateGameCompletion({
       game: GAME_URI,
-      definitions: [
-        { uri: baseAchUri, record: baseAch },
-        { uri: jamBadgeUri, record: jamBadge },
-      ],
-      verifiedUnlocks: [baseUnlockStub, jamUnlockStub],
+      definitions: allDefs,
+      verifiedUnlocks: [baseUnlockStub, jamUnlockStub, fridayUnlockStub],
     });
-    assert.equal(completionWithBonus.bonusUnlockedCount, 1);
+    assert.equal(completionWithBonus.bonusUnlockedCount, 2);
     assert.equal(completionWithBonus.completed, true);
+
+    const prof = summarizeActorProfile({
+      playerDid: ALICE_DID,
+      verifiedUnlocks: [baseUnlockStub, jamUnlockStub, fridayUnlockStub],
+      definitions: allDefs,
+    });
+    assert.equal(prof.tiers.untiered, 1); // baseAch omits tier
+    assert.equal(prof.tiers.gold, 1); // jamBadge is gold
+    assert.equal(prof.tiers.custom, 1); // fridayNightAch is custom tier "rare"
 
     // Rich RPG/Co-op unlock memory with participants, runId, #unlockContext details, media blob, and note
     const { record: richUnlock } = await createSignedUnlock({

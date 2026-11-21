@@ -69,7 +69,7 @@
           "rewardAchievement": {
             "type": "string",
             "format": "at-uri",
-            "description": "Optional AT-URI of a `games.opengaming.achievement.definition` (typically `countsTowardCompletion: false` when time-limited) awarded for completing this challenge."
+            "description": "Optional AT-URI of a `games.opengaming.achievement.definition` (typically `completionOptional: true` when time-limited) awarded for completing this challenge."
           },
           "dimensions": {
             "type": "ref",

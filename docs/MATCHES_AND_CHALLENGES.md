@@ -17,7 +17,7 @@ Games like *Spelunky*, *Balatro*, *Slay the Spire*, puzzle dailies, and live-ser
 - `seed` (`string`, <= 128 chars): Optional deterministic daily/procedural seed string (e.g. `"2026-11-08"`).
 - `targetSteps` (`integer`): Optional objective target for quest-style challenges.
 - `leaderboard` (`at-uri`): Optional link to the `games.opengaming.leaderboard.definition` ranking runs for this challenge (queried via `?seed=<seed>&dimensions=...`).
-- `rewardAchievement` (`at-uri`): Optional link to a `games.opengaming.achievement.definition` unlocked upon completion (often `countsTowardCompletion: false` or `repeatable: true`).
+- `rewardAchievement` (`at-uri`): Optional link to a `games.opengaming.achievement.definition` unlocked upon completion (often `completionOptional: true` or `repeatable: true`).
 - `dimensions` (`games.opengaming.defs#stringMap`): Required sub-board dimension values for participating runs (e.g. `{ "character": "ironclad", "ascension": "20" }`).
 - `startsAt` / `endsAt` (`datetime`): Active window for the challenge.
 

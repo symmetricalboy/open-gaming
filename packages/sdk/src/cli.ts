@@ -30,8 +30,10 @@ import {
   validateScoreComponents,
   validateScoreDimensions,
 } from './leaderboards.js';
+import { validateTimelockRanges } from './profile.js';
 import { NSIDS } from './constants.js';
 import type {
+  AchievementDefinitionRecord,
   AtprotoLabel,
   LeaderboardDefinitionRecord,
   MatchResultRecord,
@@ -199,6 +201,14 @@ async function main(): Promise<void> {
         for (const rec of recordsToCheck) {
           const hydrated = jsonToLex(rec.value as Record<string, unknown>);
           lex.assertValidRecord(rec.nsid, hydrated);
+
+          if (rec.nsid === NSIDS.AchievementDefinition) {
+            const achDef = rec.value as AchievementDefinitionRecord;
+            const tlErr = validateTimelockRanges(achDef.timelocked);
+            if (tlErr) {
+              throw new Error(`${rec.label}: ${tlErr}`);
+            }
+          }
 
           if (rec.nsid === NSIDS.LeaderboardDefinition) {
             const def = rec.value as LeaderboardDefinitionRecord;

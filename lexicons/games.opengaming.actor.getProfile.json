@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "Returns a player's Gamercard summary centered on per-game achievement appreciation and completion (with no global XP/gamerscore system or per-game achievement count cap). Bonus/event/DLC Feats of Strength (`countsTowardCompletion: false`) are celebrated via `bonusUnlockedCount` without penalizing `100%` base-game completion.",
+      "description": "Returns a player's Gamercard summary centered on per-game achievement appreciation and completion (with no global XP/gamerscore system or per-game achievement count cap). Optional/seasonal/DLC achievements (`completionOptional: true`) are celebrated via `bonusUnlockedCount` without penalizing `100%` base-game completion.",
       "parameters": {
         "type": "params",
         "required": ["actor"],
@@ -39,7 +39,7 @@
             "completedGames": {
               "type": "integer",
               "minimum": 0,
-              "description": "Number of games in which the player has unlocked 100% of completion-counted achievements (`countsTowardCompletion != false`)."
+              "description": "Number of games in which the player has unlocked 100% of required completion achievements (`completionOptional != true`)."
             },
             "totalUnlocks": {
               "type": "integer",
@@ -69,6 +69,11 @@
         "gold": { "type": "integer", "minimum": 0 },
         "silver": { "type": "integer", "minimum": 0 },
         "bronze": { "type": "integer", "minimum": 0 },
+        "custom": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional count of unlocked achievements using game-defined custom `tier` values outside `bronze`/`silver`/`gold`/`platinum` (e.g. `common`, `uncommon`, `rare`)."
+        },
         "untiered": { "type": "integer", "minimum": 0 }
       }
     },
@@ -83,17 +88,17 @@
         "unlockedCount": {
           "type": "integer",
           "minimum": 0,
-          "description": "Distinct completion-counted (`countsTowardCompletion != false`) achievements unlocked by the player."
+          "description": "Distinct required (`completionOptional != true`) achievements unlocked by the player."
         },
         "totalAchievements": {
           "type": "integer",
           "minimum": 0,
-          "description": "Total completion-counted (`countsTowardCompletion != false`) achievements defined by this game (uncapped)."
+          "description": "Total required (`completionOptional != true`) achievements defined by this game (uncapped)."
         },
         "bonusUnlockedCount": {
           "type": "integer",
           "minimum": 0,
-          "description": "Verified unlocks earned on non-completion Feats of Strength, Game Jam, or DLC bonus achievements (`countsTowardCompletion: false`)."
+          "description": "Verified unlocks earned on optional seasonal, Game Jam, or DLC achievements (`completionOptional: true`)."
         },
         "completionPercent": {
           "type": "integer",
