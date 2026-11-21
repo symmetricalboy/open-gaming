@@ -9,3 +9,4 @@ export * from './revocation.js';
 export * from './profile.js';
 export * from './leaderboards.js';
 export * from './lexicons.js';
+export * from './appview/index.js';

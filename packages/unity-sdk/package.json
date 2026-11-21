@@ -1,0 +1,19 @@
+{
+  "name": "com.opengaming.sdk",
+  "version": "0.1.0",
+  "displayName": "Open Gaming ATProto SDK",
+  "description": "Unity C# SDK for Open Gaming (games.opengaming.*) AT Protocol Achievements, Leaderboards, Challenges, Co-Signed PvP Matches, Mode A Inline Attestations, and AppView Queries.",
+  "unity": "2021.3",
+  "license": "CC0-1.0",
+  "keywords": [
+    "atproto",
+    "bluesky",
+    "achievements",
+    "leaderboards",
+    "opengaming"
+  ],
+  "author": {
+    "name": "Open Gaming Contributors",
+    "url": "https://opengaming.games"
+  }
+}

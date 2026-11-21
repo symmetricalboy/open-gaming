@@ -31,13 +31,18 @@ Shared AT Protocol Lexicons, TypeScript SDK & CLI (`@opengaming/sdk`), Reference
 ## Monorepo Layout
 
 - [`lexicons/`](lexicons/) — Canonical `games.opengaming.*` ATProto Lexicon v1 JSON schemas (11 schemas)
-- [`packages/sdk/`](packages/sdk/) — `@opengaming/sdk` TypeScript library & `opengaming` CLI
-- [`docs/`](docs/) — Reference specifications & integration guides:
+- [`packages/sdk/`](packages/sdk/) — `@opengaming/sdk` TypeScript library, `@opengaming/sdk/appview` AppView & Web Viewer toolkit, and `opengaming` CLI
+- [`packages/unity-sdk/`](packages/unity-sdk/) — `com.opengaming.sdk` Unity Package Manager (UPM) C# SDK (`UnityWebRequest`, PKCE + DPoP OAuth, offline queue, byte-identical DAG-CBOR/P-256 attestations)
+- [`packages/kotlin-sdk/`](packages/kotlin-sdk/) — `games.opengaming:sdk` Native Android & Kotlin SDK (`kotlinx.serialization`, Coroutines, Custom Tabs OAuth + DPoP, `WorkManager` offline queue)
+- [`docs/`](docs/) — Reference specifications & platform integration guides:
   - [`docs/ATTESTATION_AND_REVOCATION.md`](docs/ATTESTATION_AND_REVOCATION.md)
   - [`docs/ACHIEVEMENTS.md`](docs/ACHIEVEMENTS.md)
   - [`docs/LEADERBOARDS.md`](docs/LEADERBOARDS.md)
   - [`docs/MATCHES_AND_CHALLENGES.md`](docs/MATCHES_AND_CHALLENGES.md)
   - [`docs/SDK_AND_CLI.md`](docs/SDK_AND_CLI.md)
+  - [`docs/UNITY_SDK.md`](docs/UNITY_SDK.md)
+  - [`docs/ANDROID_KOTLIN_SDK.md`](docs/ANDROID_KOTLIN_SDK.md)
+  - [`docs/APPVIEW_IMPLEMENTATION.md`](docs/APPVIEW_IMPLEMENTATION.md)
 - [`examples/`](examples/) — End-to-end sample records ([`flappysky.examples.json`](examples/flappysky.examples.json))
 - [`apps/web/`](apps/web/) — The **`opengaming.games`** AppView, Jetstream/PDS Indexer, XRPC Server, and Achievement & Leaderboard Viewer web app
 

@@ -116,12 +116,55 @@ const { record: signedScore } = await createSignedScore({
 
 // 2. Evaluate personalBests / overwriteBest / perWindowBest / everyRun write policy
 const plan = evaluateScoreSubmission({
-  candidateScore: 2840,
+  leaderboardUri: 'at://did:plc:game/games.opengaming.leaderboard.definition/stage-1',
+  score: 2840,
   definition: leaderboardDef,
-  existingScores: playerExistingVerifiedScores,
-  candidateDimensions: { mode: '4k' },
+  existingPlayerScores: playerExistingVerifiedScores,
+  dimensions: { mode: '4k' },
 });
 if (plan.shouldWrite) {
-  console.log(plan.writeMode, plan.recommendedRkey); // 'create' | 'put'
+  console.log(plan.writeMode, plan.recommendedRkey); // 'createRecord' | 'putRecord'
 }
 ```
+
+---
+
+## 3. AppView & Web Viewer SDK (`@opengaming/sdk/appview`)
+
+Build a custom ATProto AppView or web viewer for **achievements**, **leaderboards**, **player game libraries/shelves**, and **PvP match histories**:
+
+```ts
+import {
+  OpenGamingAppViewEngine,
+  OpenGamingJetstreamConsumer,
+  OpenGamingViewerClient,
+  createAppViewFetchHandler,
+  groupLibraryByShelf,
+} from '@opengaming/sdk/appview';
+
+// Server: index Jetstream firehose + expose standard XRPC & viewer endpoints
+const engine = new OpenGamingAppViewEngine();
+const jetstream = new OpenGamingJetstreamConsumer(engine);
+jetstream.start();
+
+export const handleRequest = createAppViewFetchHandler(engine);
+
+// Browser / SSR Viewer Client: fetch gamercards, leaderboards, and game libraries
+const viewer = new OpenGamingViewerClient('https://opengaming.games');
+const library = await viewer.getActorLibrary({ actor: 'symmetricalboy.com' });
+const shelves = groupLibraryByShelf(library.items);
+```
+
+See [`docs/APPVIEW_IMPLEMENTATION.md`](./APPVIEW_IMPLEMENTATION.md) for the complete server & frontend viewer implementation guide.
+
+---
+
+## 4. Multi-Platform Game Engine & Mobile SDKs
+
+All three Open Gaming SDKs produce **byte-for-byte identical** IPLD DAG-CBOR encodings, CIDv1 (`bafy...`) attestation hashes, deterministic `rkey`s, and `low-S` P-256 ECDSA (`did:key:zDna...`) signatures:
+
+| Platform | Package | Location | Integration Guide |
+| :--- | :--- | :--- | :--- |
+| **TypeScript / Node / Web** | `@opengaming/sdk` & `@opengaming/sdk/appview` | [`packages/sdk/`](../packages/sdk/) | [`docs/SDK_AND_CLI.md`](./SDK_AND_CLI.md) & [`docs/APPVIEW_IMPLEMENTATION.md`](./APPVIEW_IMPLEMENTATION.md) |
+| **Unity (C# / UPM)** | `com.opengaming.sdk` | [`packages/unity-sdk/`](../packages/unity-sdk/) | [`docs/UNITY_SDK.md`](./UNITY_SDK.md) |
+| **Native Android (Kotlin)** | `games.opengaming:sdk` | [`packages/kotlin-sdk/`](../packages/kotlin-sdk/) | [`docs/ANDROID_KOTLIN_SDK.md`](./ANDROID_KOTLIN_SDK.md) |

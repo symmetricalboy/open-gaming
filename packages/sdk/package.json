@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./appview": {
+      "types": "./dist/appview/index.d.ts",
+      "default": "./dist/appview/index.js"
     }
   },
   "bin": {

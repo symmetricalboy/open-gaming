@@ -12,3 +12,7 @@ coverage/
 apps/web/data/
 packages/sdk/lexicons/
 *.tgz
+bin/
+obj/
+.gradle/
+packages/kotlin-sdk/build/
